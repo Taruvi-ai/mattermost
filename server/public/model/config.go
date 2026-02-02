@@ -3058,6 +3058,8 @@ type TaruviSettings struct {
 	AuthEndpoint      *string `access:"authentication_taruvi"`
 	UserEndpoint      *string `access:"authentication_taruvi"`
 	ConnectionTimeout *int    `access:"authentication_taruvi"`
+	OverrideHost      *bool   `access:"authentication_taruvi"`
+	HostOverrideValue *string `access:"authentication_taruvi"`
 }
 
 func (s *TaruviSettings) SetDefaults() {
@@ -3075,6 +3077,12 @@ func (s *TaruviSettings) SetDefaults() {
 	}
 	if s.ConnectionTimeout == nil {
 		s.ConnectionTimeout = NewPointer(10)
+	}
+	if s.OverrideHost == nil {
+		s.OverrideHost = NewPointer(false)
+	}
+	if s.HostOverrideValue == nil {
+		s.HostOverrideValue = NewPointer("")
 	}
 }
 

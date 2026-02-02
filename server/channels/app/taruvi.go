@@ -54,7 +54,14 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Host = "localhost:8000"
+
+	// Only set Host header if explicitly configured in settings
+	if config.TaruviSettings.OverrideHost != nil && *config.TaruviSettings.OverrideHost {
+		hostValue := *config.TaruviSettings.HostOverrideValue
+		if hostValue != "" {
+			req.Host = hostValue
+		}
+	}
 
 	client := &http.Client{
 		Timeout: timeout,
