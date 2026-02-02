@@ -38,6 +38,12 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 
 	url := serverURL + authEndpoint
 
+	rctx.Logger().Info("Taruvi authentication request",
+		mlog.String("url", url),
+		mlog.String("server_url", serverURL),
+		mlog.String("auth_endpoint", authEndpoint),
+		mlog.String("username", username))
+
 	reqBody := model.TaruviAuthRequest{
 		Email:    username,
 		Password: password,
@@ -48,6 +54,8 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
+	rctx.Logger().Debug("Taruvi request body", mlog.String("body", string(jsonData)))
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.request_error", nil, "", http.StatusInternalServerError).Wrap(err)
@@ -55,11 +63,12 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 
 	req.Header.Set("Content-Type", "application/json")
 
-	// Only set Host header if explicitly configured in settings
+	// Set Host header if configured
 	if config.TaruviSettings.OverrideHost != nil && *config.TaruviSettings.OverrideHost {
 		hostValue := *config.TaruviSettings.HostOverrideValue
 		if hostValue != "" {
 			req.Host = hostValue
+			rctx.Logger().Info("Taruvi Host header set", mlog.String("host", hostValue))
 		}
 	}
 
@@ -78,6 +87,10 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 	if err != nil {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
+
+	rctx.Logger().Info("Taruvi response", 
+		mlog.Int("status_code", resp.StatusCode),
+		mlog.String("response_body", string(body)))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.invalid_credentials", nil, fmt.Sprintf("Status: %d", resp.StatusCode), http.StatusUnauthorized)
@@ -108,6 +121,14 @@ func (tp *TaruviProvider) GetUserInfo(rctx request.CTX, accessToken string) (*mo
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
+
+	// Set Host header if configured
+	if config.TaruviSettings.OverrideHost != nil && *config.TaruviSettings.OverrideHost {
+		hostValue := *config.TaruviSettings.HostOverrideValue
+		if hostValue != "" {
+			req.Host = hostValue
+		}
+	}
 
 	client := &http.Client{
 		Timeout: timeout,

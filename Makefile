@@ -36,6 +36,29 @@ setup:
 	@docker compose build --no-cache
 	@echo ""
 	@echo "✓ Setup complete! Run 'make dev' to begin."
+	@echo "ℹ️  To connect to Taruvi, ensure Mattermost is running then run 'make connect-to-taruvi'."
+
+# Connect to Taruvi network (run after both systems are up)
+connect-to-taruvi:
+	@echo "Connecting Mattermost to Taruvi networks (if both systems are running)..."
+	@container_id=$$(docker ps -q --filter "name=mattermost-server"); \
+	if [ -z "$$container_id" ]; then \
+		echo "⚠️  Warning: Mattermost server container not found. Make sure it's running with 'make dev' first."; \
+		exit 0; \
+	fi; \
+	if docker network ls --format "{{.Name}}" | grep -q "^taruvi_default$$"; then \
+		docker network connect taruvi_default $$container_id 2>/dev/null || echo "Note: Already connected to taruvi_default"; \
+		echo "✓ Connected to taruvi_default network"; \
+	else \
+		echo "ℹ️  Note: taruvi_default network does not exist."; \
+	fi; \
+	if docker network ls --format "{{.Name}}" | grep -q "^taruvi_web$$"; then \
+		docker network connect taruvi_web $$container_id 2>/dev/null || echo "Note: Already connected to taruvi_web"; \
+		echo "✓ Connected to taruvi_web network"; \
+	else \
+		echo "ℹ️  Note: taruvi_web network does not exist."; \
+	fi
+	@echo "✓ Connection check completed."
 
 # Development mode (server + webapp dev)
 dev:
@@ -47,6 +70,7 @@ dev:
 	@echo "✓ Server running at: http://localhost:8065"
 	@echo "✓ Starting webapp dev server at: http://localhost:9005"
 	@echo ""
+	@echo "ℹ️  To connect to Taruvi, ensure Taruvi is running then run 'make connect-to-taruvi' after."
 	@cd webapp && npm run dev-server
 
 # Stop all services
