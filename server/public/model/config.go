@@ -3052,6 +3052,32 @@ func (s *SamlSettings) SetDefaults() {
 	}
 }
 
+type TaruviSettings struct {
+	Enable            *bool   `access:"authentication_taruvi"`
+	TaruviServerURL   *string `access:"authentication_taruvi"`
+	AuthEndpoint      *string `access:"authentication_taruvi"`
+	UserEndpoint      *string `access:"authentication_taruvi"`
+	ConnectionTimeout *int    `access:"authentication_taruvi"`
+}
+
+func (s *TaruviSettings) SetDefaults() {
+	if s.Enable == nil {
+		s.Enable = NewPointer(false)
+	}
+	if s.TaruviServerURL == nil {
+		s.TaruviServerURL = NewPointer("http://localhost:8000")
+	}
+	if s.AuthEndpoint == nil {
+		s.AuthEndpoint = NewPointer("/api/_allauth/browser/v1/auth/login")
+	}
+	if s.UserEndpoint == nil {
+		s.UserEndpoint = NewPointer("/api/users/me/")
+	}
+	if s.ConnectionTimeout == nil {
+		s.ConnectionTimeout = NewPointer(10)
+	}
+}
+
 type NativeAppSettings struct {
 	AppCustomURLSchemes           []string `access:"site_customization,write_restrictable,cloud_restrictable"` // telemetry: none
 	AppDownloadLink               *string  `access:"site_customization,write_restrictable,cloud_restrictable"`
@@ -3970,6 +3996,7 @@ type Config struct {
 	ComplianceSettings          ComplianceSettings
 	LocalizationSettings        LocalizationSettings
 	SamlSettings                SamlSettings
+	TaruviSettings              TaruviSettings
 	NativeAppSettings           NativeAppSettings
 	IntuneSettings              IntuneSettings
 	CacheSettings               CacheSettings
@@ -4057,6 +4084,7 @@ func (o *Config) SetDefaults() {
 
 	o.LdapSettings.SetDefaults()
 	o.SamlSettings.SetDefaults()
+	o.TaruviSettings.SetDefaults()
 
 	if o.TeamSettings.TeammateNameDisplay == nil {
 		o.TeamSettings.TeammateNameDisplay = NewPointer(ShowUsername)
