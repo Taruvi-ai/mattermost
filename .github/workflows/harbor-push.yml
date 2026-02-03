@@ -30,13 +30,9 @@ jobs:
           password: ${{ secrets.HARBOR_PASSWORD }}
 
       - name: Build and Push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: server/build/Dockerfile
-          push: true
-          cache-from: type=registry,ref=repo.eoxvantage.com/mattermost/mattermost:buildcache
-          cache-to: type=registry,ref=repo.eoxvantage.com/mattermost/mattermost:buildcache,mode=max
-          tags: |
-            repo.eoxvantage.com/mattermost/mattermost:latest
-            repo.eoxvantage.com/mattermost/mattermost:${{ github.sha }}
+        run: |
+          cd server/build
+          docker buildx build --platform linux/amd64 --push \
+            -t repo.eoxvantage.com/mattermost/mattermost:latest \
+            -t repo.eoxvantage.com/mattermost/mattermost:${{ github.sha }} \
+            .
