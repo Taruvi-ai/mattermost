@@ -32,6 +32,7 @@ jobs:
       - name: Build and Push
         run: |
           cd server/build
+          docker login repo.eoxvantage.com -u ${{ secrets.HARBOR_USERNAME }} -p ${{ secrets.HARBOR_PASSWORD }}
           docker buildx build --platform linux/amd64 --push \
             -t repo.eoxvantage.com/mattermost/mattermost:latest \
             -t repo.eoxvantage.com/mattermost/mattermost:${{ github.sha }} \
