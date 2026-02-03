@@ -29,6 +29,6 @@ jobs:
       - name: Build and Push
         run: |
           cd server/build
-          docker build -t repo.eoxvantage.com/mattermost/mattermost:latest -t repo.eoxvantage.com/mattermost/mattermost:${{ github.sha }} .
-          docker push repo.eoxvantage.com/mattermost/mattermost:latest
-          docker push repo.eoxvantage.com/mattermost/mattermost:${{ github.sha }}
+          docker build -t repo.eoxvantage.com/taruvi/mattermost:latest -t repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }} .
+          docker push repo.eoxvantage.com/taruvi/mattermost:latest
+          docker push repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
