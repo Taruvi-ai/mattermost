@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mmuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mostest}
+      POSTGRES_DB: ${POSTGRES_DB:-mattermost}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5435}:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-mmuser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mattermost-server:
+    build: .
+    user: "2000:2000"
+    ports:
+      - "${MATTERMOST_PORT:-8065}:8065"
+    env_file:
+      - .env
+    environment:
+      - MM_SQLSETTINGS_DATASOURCE=${MM_SQLSETTINGS_DATASOURCE:-postgres://mmuser:mostest@postgres:5432/mattermost?sslmode=disable}
+      - MM_SERVICESETTINGS_SITEURL=${MM_SERVICESETTINGS_SITEURL:-http://localhost:8065}
+      - MM_SERVICESETTINGS_LISTENADDRESS=0.0.0.0:8065
+      - MM_LOGSETTINGS_CONSOLELEVEL=${MM_LOGSETTINGS_CONSOLELEVEL:-INFO}
+    volumes:
+      - mm_data:/mattermost/data:Z
+      - mm_logs:/mattermost/logs:Z
+    networks:
+      - default
+      - taruvi_default
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  mm_data:
+  mm_logs:
+
+networks:
+  taruvi_default:
+    external: true

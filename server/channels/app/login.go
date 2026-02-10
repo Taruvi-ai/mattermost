@@ -4,7 +4,10 @@
 package app
 
 import (
+	"crypto/md5"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -26,6 +29,19 @@ import (
 
 const cwsTokenEnv = "CWS_CLOUD_TOKEN"
 
+// hashTaruviUsername hashes the Taruvi username using SHA256 then MD5
+func hashTaruviUsername(username string) string {
+	// First: SHA256 hash of username
+	sha256Hash := sha256.Sum256([]byte(username))
+	sha256Hex := hex.EncodeToString(sha256Hash[:])
+
+	// Second: MD5 hash of the SHA256 hash
+	md5Hash := md5.Sum([]byte(sha256Hex))
+	md5Hex := hex.EncodeToString(md5Hash[:])
+
+	return md5Hex
+}
+
 func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken string, ldapOnly bool) (user *model.User, err *model.AppError) {
 	// Do statistics
 	defer func() {
@@ -42,14 +58,13 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 		return nil, model.NewAppError("AuthenticateUserForLogin", "api.user.login.blank_pwd.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	// Get the MM user we are trying to login
-	if user, err = a.GetUserForLogin(rctx, id, loginId); err != nil {
-		return nil, err
-	}
-
 	// CWS login allow to use the one-time token to login the users when they're redirected to their
 	// installation for the first time
 	if isCWSLogin(a, cwsToken) {
+		// Get the MM user we are trying to login
+		if user, err = a.GetUserForLogin(rctx, id, loginId); err != nil {
+			return nil, err
+		}
 		if err = checkUserNotBot(user); err != nil {
 			return nil, err
 		}
@@ -83,9 +98,49 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 			"api.user.login_by_cws.invalid_token.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	// and then authenticate them
-	if user, err = a.authenticateUser(rctx, user, password, mfaToken); err != nil {
+	rctx.Logger().Info("Starting Taruvi authentication", mlog.String("login_id", loginId))
+
+	// Taruvi authentication (always enabled)
+	authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password)
+	if err != nil {
+		rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
 		return nil, err
+	}
+
+	taruviUsername := authResp.Data.User.Username
+	md5Hash := hashTaruviUsername(taruviUsername)
+
+	// Now get the MM user
+	user, err = a.GetUserForLogin(rctx, id, loginId)
+	if err != nil {
+		rctx.Logger().Error("GetUserForLogin failed",
+			mlog.String("id", id),
+			mlog.String("loginId", loginId),
+			mlog.Err(err))
+		return nil, err
+	}
+
+	// Check password using the MD5 hash
+	// Mattermost will compare this against the PHC-hashed password in DB
+	if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, md5Hash, mfaToken); err != nil {
+		rctx.Logger().Error("CheckPasswordAndAllCriteria failed", mlog.Err(err))
+		return nil, model.NewAppError("AuthenticateUserForLogin",
+			"api.user.login.invalid_credentials.app_error", nil, "", http.StatusUnauthorized)
+	}
+
+	if err := checkUserNotBot(user); err != nil {
+		return nil, err
+	}
+
+	if err := checkUserNotDisabled(user); err != nil {
+		return nil, err
+	}
+
+	if user.FailedAttempts > 0 {
+		if passErr := a.Srv().Store().User().UpdateFailedPasswordAttempts(user.Id, 0); passErr != nil {
+			return nil, model.NewAppError("AuthenticateUserForLogin",
+				"app.user.update_failed_pwd_attempts.app_error", nil, "", http.StatusInternalServerError).Wrap(passErr)
+		}
 	}
 
 	return user, nil
