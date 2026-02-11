@@ -13,6 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # Fetch secrets from Infisical
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
