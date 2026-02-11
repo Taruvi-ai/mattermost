@@ -26,7 +26,7 @@ jobs:
 
       - name: Create .env file for Docker build
         run: |
-          printenv | grep -E '^(MM_|HARBOR_|AWS_|ALLOW|API_)' > .env
+          printenv | grep -E '^(MM_|AWS_|ALLOW|API_)' > .env
           cat .env
 
       - name: Login to Harbor
