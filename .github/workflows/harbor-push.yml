@@ -20,7 +20,7 @@ jobs:
           client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
           client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
           env-slug: taruvi-test
-          project-slug: ${{ vars.MATTERMOST_PROJECT_SLUG }}
+          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
           secret-path: /Mattermost
           domain: "https://environment.eoxvantage.com"
 
