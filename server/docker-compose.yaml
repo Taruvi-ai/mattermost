@@ -131,7 +131,6 @@ services:
       - start_dependencies
     volumes:
       - './../:/home/mattermost-server'
-      - './../../enterprise:/home/enterprise'
     restart: on-failure
     healthcheck:
       test: ["CMD", "curl", "-f", "http://leader:8065/api/v4/system/ping"]
@@ -139,7 +138,6 @@ services:
       timeout: 30s
       retries: 30
       start_period: 5m
-    user: ${CURRENT_UID}
     command: ['make', 'run-server']
     expose:
       - "8065"
