@@ -24,8 +24,10 @@ jobs:
           secret-path: /Mattermost
           domain: "https://environment.eoxvantage.com"
 
-      - name: Set environment variables for Harbor login
-        run: cat .env >> $GITHUB_ENV
+      - name: Create .env file for Docker build
+        run: |
+          printenv | grep -E '^(MM_|HARBOR_|AWS_|ALLOW|API_)' > .env
+          cat .env
 
       - name: Login to Harbor
         uses: docker/login-action@v3
