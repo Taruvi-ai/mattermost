@@ -125,10 +125,6 @@ services:
       - "MM_CLUSTERSETTINGS_ENABLE=true"
       - "MM_CLUSTERSETTINGS_CLUSTERNAME=mm_dev_cluster"
       - "MM_LOGSETTINGS_FILELOCATION=./logs/leader"
-      - "MM_TARUVISETTINGS_ENABLE=${MM_TARUVISETTINGS_ENABLE:-true}"
-      - "MM_TARUVISETTINGS_TARUVISERVERURL=${MM_TARUVISETTINGS_TARUVISERVERURL:-http://taruvi_web:8000}"
-      - "MM_TARUVISETTINGS_AUTHENDPOINT=${MM_TARUVISETTINGS_AUTHENDPOINT:-/api/_allauth/browser/v1/auth/login}"
-      - "MM_TARUVISETTINGS_USERENDPOINT=${MM_TARUVISETTINGS_USERENDPOINT:-/api/users/me/}"
     networks:
       - mm-test
     depends_on:
@@ -143,6 +139,7 @@ services:
       timeout: 30s
       retries: 30
       start_period: 5m
+    user: ${CURRENT_UID}
     command: ['make', 'run-server']
     expose:
       - "8065"
@@ -151,6 +148,81 @@ services:
       - "8074/tcp"
       - "8074/udp"
       - "8075"
+
+  follower:
+    build:
+      context: .
+      dockerfile: ./build/Dockerfile.buildenv
+    working_dir: '/home/mattermost-server/server'
+    environment:
+      - "MM_SQLSETTINGS_DRIVERNAME=postgres"
+      - "MM_SQLSETTINGS_DATASOURCE=postgres://mmuser:mostest@postgres/mattermost_test?sslmode=disable\u0026connect_timeout=10"
+      - "MM_NO_DOCKER=true"
+      - "RUN_SERVER_IN_BACKGROUND=false"
+      - "MM_CLUSTERSETTINGS_ENABLE=true"
+      - "MM_CLUSTERSETTINGS_CLUSTERNAME=mm_dev_cluster"
+      - "MM_LOGSETTINGS_FILELOCATION=./logs/follower"
+    networks:
+      - mm-test
+    depends_on:
+      - leader
+    volumes:
+      - './../:/home/mattermost-server:Z'
+      - './../../enterprise:/home/enterprise:Z'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://follower:8065/api/v4/system/ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+      start_period: 5m
+    user: ${CURRENT_UID}
+    command: ['make', 'run-server']
+    restart: on-failure
+    expose:
+      - "8065"
+      - "8064/tcp"
+      - "8064/udp"
+      - "8074/tcp"
+      - "8074/udp"
+      - "8075"
+
+  follower2:
+    build:
+      context: .
+      dockerfile: ./build/Dockerfile.buildenv
+    working_dir: '/home/mattermost-server/server'
+    environment:
+      - "MM_SQLSETTINGS_DRIVERNAME=postgres"
+      - "MM_SQLSETTINGS_DATASOURCE=postgres://mmuser:mostest@postgres/mattermost_test?sslmode=disable\u0026connect_timeout=10"
+      - "MM_NO_DOCKER=true"
+      - "RUN_SERVER_IN_BACKGROUND=false"
+      - "MM_CLUSTERSETTINGS_ENABLE=true"
+      - "MM_CLUSTERSETTINGS_CLUSTERNAME=mm_dev_cluster"
+      - "MM_LOGSETTINGS_FILELOCATION=./logs/follower2"
+    networks:
+      - mm-test
+    depends_on:
+      - leader
+    volumes:
+      - './../:/home/mattermost-server:Z'
+      - './../../enterprise:/home/enterprise:Z'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://follower2:8065/api/v4/system/ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 30
+      start_period: 5m
+    user: ${CURRENT_UID}
+    command: ['make', 'run-server']
+    restart: on-failure
+    expose:
+      - "8065"
+      - "8064/tcp"
+      - "8064/udp"
+      - "8074/tcp"
+      - "8074/udp"
+      - "8075"
+
   haproxy:
     image: nginx
     networks:
@@ -160,6 +232,10 @@ services:
     restart: on-failure
     depends_on:
       leader:
+        condition: service_healthy
+      follower:
+        condition: service_healthy
+      follower2:
         condition: service_healthy
     ports:
       - "8065:8065"

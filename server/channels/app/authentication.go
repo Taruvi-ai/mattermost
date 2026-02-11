@@ -427,15 +427,14 @@ func (a *App) authenticateUser(rctx request.CTX, user *model.User, password, mfa
 		return user, err
 	}
 
-	// Password check commented out - Taruvi handles authentication
-	// if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, password, mfaToken); err != nil {
-	// 	if err.Id == "api.user.check_user_password.invalid.app_error" {
-	// 		rctx.Logger().LogM(mlog.MlvlLDAPInfo, "A user tried to sign in, which matched a Mattermost account, but the password was incorrect.", mlog.String("username", user.Username))
-	// 	}
+	if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, password, mfaToken); err != nil {
+		if err.Id == "api.user.check_user_password.invalid.app_error" {
+			rctx.Logger().LogM(mlog.MlvlLDAPInfo, "A user tried to sign in, which matched a Mattermost account, but the password was incorrect.", mlog.String("username", user.Username))
+		}
 
-	// 	err.StatusCode = http.StatusUnauthorized
-	// 	return user, err
-	// }
+		err.StatusCode = http.StatusUnauthorized
+		return user, err
+	}
 
 	return user, nil
 }
