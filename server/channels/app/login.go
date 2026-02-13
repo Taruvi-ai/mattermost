@@ -107,8 +107,12 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 		return nil, err
 	}
 
-	taruviUsername := authResp.Data.User.Username
-	md5Hash := hashTaruviUsername(taruviUsername)
+	rctx.Logger().Info("Taruvi authentication successful", 
+		mlog.String("taruvi_username", authResp.Data.User.Username))
+
+
+	// taruviUsername := authResp.Data.User.Username
+	// md5Hash := hashTaruviUsername(taruviUsername)
 
 	// Now get the MM user
 	user, err = a.GetUserForLogin(rctx, id, loginId)
@@ -122,11 +126,11 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 
 	// Check password using the MD5 hash
 	// Mattermost will compare this against the PHC-hashed password in DB
-	if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, md5Hash, mfaToken); err != nil {
-		rctx.Logger().Error("CheckPasswordAndAllCriteria failed", mlog.Err(err))
-		return nil, model.NewAppError("AuthenticateUserForLogin",
-			"api.user.login.invalid_credentials.app_error", nil, "", http.StatusUnauthorized)
-	}
+	// if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, md5Hash, mfaToken); err != nil {
+	// 	rctx.Logger().Error("CheckPasswordAndAllCriteria failed", mlog.Err(err))
+	// 	return nil, model.NewAppError("AuthenticateUserForLogin",
+	// 		"api.user.login.invalid_credentials.app_error", nil, "", http.StatusUnauthorized)
+	// }
 
 	if err := checkUserNotBot(user); err != nil {
 		return nil, err
