@@ -35,8 +35,8 @@ RUN mkdir -p /mattermost/data /mattermost/plugins /mattermost/client/plugins \
 RUN mkdir -p /mattermost/.postgresql \
   && chmod 700 /mattermost/.postgresql
 
-# Final stage using distroless for minimal attack surface
-FROM gcr.io/distroless/base-debian12
+# Final stage using Ubuntu for shell access
+FROM ubuntu:noble-20251013@sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54
 
 # Some ENV variables
 ENV PATH="/mattermost/bin:${PATH}"
