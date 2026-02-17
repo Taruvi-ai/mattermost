@@ -42,8 +42,6 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v6
         with:
-          context: server/build
-          file: server/build/Dockerfile
           push: true
           cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
           cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
