@@ -4,7 +4,9 @@ WORKDIR /build
 # Create the proper directory structure for the workspace
 RUN mkdir -p github.com/mattermost/mattermost/server/v8
 RUN mkdir -p github.com/mattermost/mattermost/server/v8/public
-
+ENV PATH="/mattermost/bin:${PATH}"
+ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
+ENV MM_INSTALL_TYPE="docker"
 # Copy the main server module
 WORKDIR /build/github.com/mattermost/mattermost/server/v8
 COPY server/go.mod server/go.sum ./
@@ -43,7 +45,9 @@ COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/public/ /m
 # Create necessary directories and set ownership
 RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins && \
     chown -R mattermost:mattermost /mattermost
-
+ENV PATH="/mattermost/bin:${PATH}"
+ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
+ENV MM_INSTALL_TYPE="docker"
 EXPOSE 8065
 USER mattermost
 ENTRYPOINT ["./bin/mattermost"]
