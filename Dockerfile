@@ -1,3 +1,11 @@
+# Stage 1: Build webapp
+FROM node:18-alpine AS webapp-builder
+WORKDIR /webapp
+COPY webapp/package*.json ./
+COPY webapp/ ./
+RUN npm ci && npm run build
+
+# Stage 2: Build server
 FROM golang:1.24-alpine AS builder
 RUN apk add --no-cache git gcc musl-dev make
 WORKDIR /build
@@ -41,6 +49,9 @@ COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/i18n/ /mat
 COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/templates/ /mattermost/templates/
 COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/fonts/ /mattermost/fonts/
 COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/public/ /mattermost/public/
+
+# Copy webapp build output
+COPY --from=webapp-builder /webapp/channels/dist /mattermost/client
 
 # Create necessary directories and set ownership
 RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins && \
