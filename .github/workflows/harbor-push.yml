@@ -43,8 +43,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
-          cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
-          cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
+          # cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
+          # cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
           tags: |
             repo.eoxvantage.com/taruvi/mattermost:latest
             repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
