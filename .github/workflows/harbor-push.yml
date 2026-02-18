@@ -69,7 +69,11 @@ jobs:
 
       - name: Create/Update Infisical Secret
         run: |
-          kubectl create secret generic mm-infisical --from-env-file=.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic mm-infisical --from-env-file=/.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Patch deployment to use envFrom
+        run: |
+          kubectl patch deployment mattermost-staging -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","envFrom":[{"secretRef":{"name":"mm-infisical"}}]}]}}}}'
         
       - name: Restart Mattermost deployment
         run: |
