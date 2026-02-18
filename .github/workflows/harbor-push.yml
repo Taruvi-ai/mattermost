@@ -69,7 +69,8 @@ jobs:
 
       - name: Create/Update Infisical Secret
         run: |
-          kubectl create secret generic mm-infisical --from-env-file=/.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+          printenv | grep '^MM_' > /tmp/mm.env
+          kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
       
       - name: Patch deployment to use envFrom
         run: |
