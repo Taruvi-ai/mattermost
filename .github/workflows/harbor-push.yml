@@ -45,6 +45,8 @@ jobs:
           push: true
           secret-files: |
             "envfile=.env"
+          cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
+          cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
           tags: |
             repo.eoxvantage.com/taruvi/mattermost:latest
             repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
@@ -66,5 +68,5 @@ jobs:
         
       - name: Restart Mattermost deployment
         run: |
-          kubectl rollout restart mattermost mattermost-staging -n mattermost
-          kubectl rollout status mattermost mattermost-staging --timeout=600s -n mattermost
+          kubectl rollout restart deployment mattermost-staging -n mattermost
+          kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
