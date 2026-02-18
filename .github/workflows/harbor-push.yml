@@ -63,6 +63,7 @@ jobs:
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
+        
       - name: Restart Mattermost deployment
         run: |
           kubectl rollout restart mattermost mattermost-staging -n mattermost
