@@ -71,6 +71,17 @@ ENV PATH="/mattermost/bin:${PATH}"
 ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
 ENV MM_INSTALL_TYPE="docker"
 
+# Load all env vars from Infisical .env file
+RUN --mount=type=secret,id=envfile,target=/tmp/.env \
+    if [ -f /tmp/.env ]; then \
+        while IFS='=' read -r key value; do \
+            [ -n "$key" ] && echo "export $key='$value'" >> /etc/environment; \
+        done < /tmp/.env; \
+    fi
+
+# Source environment file on container start
+RUN echo 'set -a && [ -f /etc/environment ] && . /etc/environment && set +a' >> /mattermost/.bashrc
+
 USER mattermost
 WORKDIR /mattermost
 
