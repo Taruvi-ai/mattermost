@@ -13,7 +13,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Fetch secrets from Infisical
+      - name: Login to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: repo.eoxvantage.com
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            repo.eoxvantage.com/taruvi/mattermost:latest
+            repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    steps:
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
@@ -24,37 +47,6 @@ jobs:
           secret-path: /Mattermost
           domain: "https://environment.eoxvantage.com"
 
-      - name: Create .env file
-        run: |
-          printenv | grep -E '^(MM_|AWS_|ALLOW|API_)' > .env
-          cat .env
-
-      - name: Login to Harbor
-        uses: docker/login-action@v3
-        with:
-          registry: repo.eoxvantage.com
-          username: ${{ env.HARBOR_USERNAME }}
-          password: ${{ env.HARBOR_PASSWORD }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and Push
-        uses: docker/build-push-action@v6
-        with:
-          push: true
-          secret-files: |
-            "envfile=.env"
-          cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
-          cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
-          tags: |
-            repo.eoxvantage.com/taruvi/mattermost:latest
-            repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
-
-  deploy:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -65,6 +57,10 @@ jobs:
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
+      - name: Create/Update Infisical Secret
+        run: |
+          printenv | grep '^MM_' > /tmp/.env
+          kubectl create secret generic mm-infisical --from-env-file=/tmp/.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
         
       - name: Restart Mattermost deployment
         run: |
