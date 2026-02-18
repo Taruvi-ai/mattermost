@@ -1,65 +1,84 @@
-# Stage 1: Build webapp
-FROM node:18-alpine AS webapp-builder
-WORKDIR /webapp
-COPY webapp/package*.json ./
-COPY webapp/ ./
-RUN npm ci && npm run build
+# Stage 1: Build server from source
+FROM golang:1.24 AS builder
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Stage 2: Build server
-FROM golang:1.24-alpine AS builder
-RUN apk add --no-cache git gcc musl-dev make
-WORKDIR /build
-# Create the proper directory structure for the workspace
-RUN mkdir -p github.com/mattermost/mattermost/server/v8
-RUN mkdir -p github.com/mattermost/mattermost/server/v8/public
+# Build tools for server
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+    git gcc make curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /mattermost
+COPY . .
+
+WORKDIR /mattermost/server
+ENV CI=true
+RUN make setup-go-work && make build-cmd-linux
+
+# Stage 2: Download released package (webapp + config + assets)
+FROM ubuntu:noble-20251013@sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54 AS release
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG MM_PACKAGE="https://latest.mattermost.com/mattermost-enterprise-linux"
+
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /mattermost \
+    && curl -L $MM_PACKAGE | tar -xvz
+
+# Stage 2: Production runtime
+FROM ubuntu:noble-20251013@sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+ARG PUID=2000
+ARG PGID=2000
+
+# Install runtime dependencies for document processing
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \
+    ca-certificates \
+    curl \
+    media-types \
+    mailcap \
+    unrtf \
+    wv \
+    poppler-utils \
+    tidy \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create mattermost user
+RUN groupadd --gid ${PGID} mattermost \
+    && useradd --uid ${PUID} --gid ${PGID} --comment "" --home-dir /mattermost mattermost
+
+# Copy released package (includes webapp)
+COPY --from=release --chown=2000:2000 /mattermost /mattermost
+
+# Replace server binaries with locally built ones
+COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mattermost /mattermost/bin/mattermost
+COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mmctl /mattermost/bin/mmctl
+
+# Create required directories
+RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins /mattermost/.postgresql \
+    && chmod 700 /mattermost/.postgresql \
+    && chown -R mattermost:mattermost /mattermost
+
 ENV PATH="/mattermost/bin:${PATH}"
 ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
 ENV MM_INSTALL_TYPE="docker"
-# Copy the main server module
-WORKDIR /build/github.com/mattermost/mattermost/server/v8
-COPY server/go.mod server/go.sum ./
-COPY server/ ./
 
-# Copy the public module
-WORKDIR /build/github.com/mattermost/mattermost/server/v8/public
-COPY server/public/go.mod server/public/go.sum ./
-COPY server/public/ ./
-
-# Go back to the main server directory to build
-WORKDIR /build/github.com/mattermost/mattermost/server/v8
-
-# Add a replace directive to point to the local public module
-RUN go mod edit -replace github.com/mattermost/mattermost/server/public=./public
-
-RUN go mod download
-RUN go build -o bin/mattermost cmd/mattermost/main.go
-
-FROM alpine:latest
-RUN apk add --no-cache ca-certificates tzdata bash curl
+USER mattermost
 WORKDIR /mattermost
 
-# Create mattermost user with UID 2000
-RUN addgroup -g 2000 mattermost && \
-    adduser -D -u 2000 -G mattermost mattermost
+HEALTHCHECK --interval=30s --timeout=10s \
+    CMD ["/mattermost/bin/mmctl", "system", "status", "--local"]
 
-# Copy the binary and necessary files
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/bin/mattermost /mattermost/bin/mattermost
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/config/ /mattermost/config/
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/i18n/ /mattermost/i18n/
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/templates/ /mattermost/templates/
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/fonts/ /mattermost/fonts/
-COPY --from=builder /build/github.com/mattermost/mattermost/server/v8/public/ /mattermost/public/
+EXPOSE 8065 8067 8074 8075
 
-# Copy webapp build output
-COPY --from=webapp-builder /webapp/channels/dist /mattermost/client
+VOLUME ["/mattermost/data", "/mattermost/logs", "/mattermost/config", "/mattermost/plugins", "/mattermost/client/plugins"]
 
-# Create necessary directories and set ownership
-RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins && \
-    chown -R mattermost:mattermost /mattermost
-ENV PATH="/mattermost/bin:${PATH}"
-ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
-ENV MM_INSTALL_TYPE="docker"
-EXPOSE 8065
-USER mattermost
-ENTRYPOINT ["./bin/mattermost"]
-CMD ["server"]
+ENTRYPOINT ["/mattermost/bin/mattermost"]
