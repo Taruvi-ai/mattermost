@@ -46,8 +46,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          no-cache: true
           tags: repo.eoxvantage.com/taruvi/mattermost:latest
 
   deploy-staging:
