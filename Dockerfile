@@ -67,10 +67,6 @@ RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/c
     && chmod 700 /mattermost/.postgresql \
     && chown -R mattermost:mattermost /mattermost
 
-# Copy custom entrypoint script
-COPY --chown=2000:2000 docker-entrypoint.sh /mattermost/docker-entrypoint.sh
-RUN chmod +x /mattermost/docker-entrypoint.sh
-
 ENV PATH="/mattermost/bin:${PATH}"
 ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
 ENV MM_INSTALL_TYPE="docker"
@@ -85,4 +81,4 @@ EXPOSE 8065 8067 8074 8075
 
 VOLUME ["/mattermost/data", "/mattermost/logs", "/mattermost/config", "/mattermost/plugins", "/mattermost/client/plugins"]
 
-ENTRYPOINT ["/mattermost/docker-entrypoint.sh"]
+ENTRYPOINT ["/mattermost/bin/mattermost"]
