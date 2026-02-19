@@ -8,7 +8,8 @@ const (
 )
 
 type TaruviAuthRequest struct {
-	Email    string `json:"email"`
+	Email    string `json:"email,omitempty"`
+	Username string `json:"username,omitempty"`
 	Password string `json:"password"`
 }
 

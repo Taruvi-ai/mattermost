@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mattermost/mattermost/server/public/model"
@@ -42,11 +43,26 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 		mlog.String("url", url),
 		mlog.String("server_url", serverURL),
 		mlog.String("auth_endpoint", authEndpoint),
-		mlog.String("username", username))
+		mlog.String("login_id", username))
+
+	emailCandidate := strings.ToLower(username)
+	isEmail := model.IsValidEmail(emailCandidate)
 
 	reqBody := model.TaruviAuthRequest{
-		Email:    username,
 		Password: password,
+	}
+	if isEmail {
+		reqBody.Email = emailCandidate
+	} else {
+		reqBody.Username = username
+	}
+
+	if isEmail {
+		rctx.Logger().Info("Taruvi auth params",
+			mlog.String("email", reqBody.Email))
+	} else {
+		rctx.Logger().Info("Taruvi auth params",
+			mlog.String("username", reqBody.Username))
 	}
 
 	jsonData, err := json.Marshal(reqBody)
