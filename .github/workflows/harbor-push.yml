@@ -74,14 +74,10 @@ jobs:
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
-      - name: Create/Update Infisical Secret
+      - name: Create/Update Infisical Secret and restart
         run: |
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
-      
-      - name: Update deployment to force pull and add envFrom
-        run: |
-          kubectl patch deployment mattermost-staging -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","image":"repo.eoxvantage.com/taruvi/mattermost:latest","imagePullPolicy":"Always","envFrom":[{"secretRef":{"name":"mm-infisical"}}]}]}}}}'
           kubectl rollout restart deployment mattermost-staging -n mattermost
           kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
 
@@ -116,8 +112,12 @@ jobs:
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
       
-      - name: Update deployment to force pull and add envFrom
+      - name: Add envFrom to CRD and update image
         run: |
-          kubectl patch deployment mattermost-production -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","image":"repo.eoxvantage.com/taruvi/mattermost:latest","imagePullPolicy":"Always","envFrom":[{"secretRef":{"name":"mm-chatprod-infisical"}}]}]}}}}'
-          kubectl rollout restart deployment mattermost-production -n mattermost
+          kubectl get mattermost mattermost-production -n mattermost -o json | \
+          jq '.spec.mattermostEnv += [{"name":"INJECT_ENVFROM","value":"true"}] | .spec.image = "repo.eoxvantage.com/taruvi/mattermost:latest"' | \
+          kubectl apply -f -
+          
+          kubectl patch deployment mattermost-production -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","envFrom":[{"secretRef":{"name":"mm-chatprod-infisical"}}]}]}}}}'
+          kubectl annotate deployment mattermost-production -n mattermost kubectl.kubernetes.io/restartedAt="$(date +%Y-%m-%dT%H:%M:%S%z)" --overwrite
           kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost
