@@ -57,6 +57,14 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password 
 		reqBody.Username = username
 	}
 
+	if isEmail {
+		rctx.Logger().Info("Taruvi auth params",
+			mlog.String("email", reqBody.Email))
+	} else {
+		rctx.Logger().Info("Taruvi auth params",
+			mlog.String("username", reqBody.Username))
+	}
+
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
