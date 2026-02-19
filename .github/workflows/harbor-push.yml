@@ -74,10 +74,11 @@ jobs:
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
-      - name: Create/Update Infisical Secret and restart
+      - name: Create/Update Infisical Secret and patch deployment
         run: |
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+          kubectl patch deployment mattermost-staging -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","envFrom":[{"secretRef":{"name":"mm-infisical"}}]}]}}}}'
           kubectl rollout restart deployment mattermost-staging -n mattermost
           kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
 

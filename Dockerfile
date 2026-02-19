@@ -61,13 +61,15 @@ COPY --from=release --chown=2000:2000 /mattermost /mattermost
 # Replace server binaries with locally built ones
 COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mattermost /mattermost/bin/mattermost
 COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mmctl /mattermost/bin/mmctl
-COPY --from=builder --chown=2000:2000 /mattermost/docker-entrypoint.sh /mattermost/docker-entrypoint.sh
 
 # Create required directories
 RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins /mattermost/.postgresql \
     && chmod 700 /mattermost/.postgresql \
-    && chmod +x /mattermost/docker-entrypoint.sh \
     && chown -R mattermost:mattermost /mattermost
+
+# Copy custom entrypoint script
+COPY --chown=2000:2000 docker-entrypoint.sh /mattermost/docker-entrypoint.sh
+RUN chmod +x /mattermost/docker-entrypoint.sh
 
 ENV PATH="/mattermost/bin:${PATH}"
 ENV MM_SERVICESETTINGS_ENABLELOCALMODE="true"
