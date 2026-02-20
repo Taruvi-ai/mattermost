@@ -74,11 +74,13 @@ jobs:
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
 
-      - name: Create/Update Infisical Secret and patch deployment
+      - name: Create/Update Infisical Secret
         run: |
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
-          kubectl patch deployment mattermost-staging -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","envFrom":[{"secretRef":{"name":"mm-infisical"}}]}]}}}}'
+          
+      - name: Restart Mattermost deployment
+        run: |
           kubectl rollout restart deployment mattermost-staging -n mattermost
           kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
 
@@ -113,12 +115,7 @@ jobs:
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
       
-      - name: Add envFrom to CRD and update image
+      - name: Restart Mattermost deployment
         run: |
-          kubectl get mattermost mattermost-production -n mattermost -o json | \
-          jq '.spec.mattermostEnv += [{"name":"INJECT_ENVFROM","value":"true"}] | .spec.image = "repo.eoxvantage.com/taruvi/mattermost:latest"' | \
-          kubectl apply -f -
-          
-          kubectl patch deployment mattermost-production -n mattermost --type=strategic -p='{"spec":{"template":{"spec":{"containers":[{"name":"mattermost","envFrom":[{"secretRef":{"name":"mm-chatprod-infisical"}}]}]}}}}'
-          kubectl annotate deployment mattermost-production -n mattermost kubectl.kubernetes.io/restartedAt="$(date +%Y-%m-%dT%H:%M:%S%z)" --overwrite
+          kubectl rollout restart deployment mattermost-production -n mattermost
           kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost
