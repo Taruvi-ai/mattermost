@@ -3052,6 +3052,36 @@ func (s *SamlSettings) SetDefaults() {
 	}
 }
 
+type KeycloakSettings struct {
+	Enable            *bool   `access:"authentication_keycloak"`
+	ServerURL         *string `access:"authentication_keycloak"`
+	Realm             *string `access:"authentication_keycloak"`
+	ClientID          *string `access:"authentication_keycloak"`
+	ClientSecret      *string `access:"authentication_keycloak"`
+	ConnectionTimeout *int    `access:"authentication_keycloak"`
+}
+
+func (s *KeycloakSettings) SetDefaults() {
+	if s.Enable == nil {
+		s.Enable = NewPointer(false)
+	}
+	if s.ServerURL == nil {
+		s.ServerURL = NewPointer("")
+	}
+	if s.Realm == nil {
+		s.Realm = NewPointer("")
+	}
+	if s.ClientID == nil {
+		s.ClientID = NewPointer("")
+	}
+	if s.ClientSecret == nil {
+		s.ClientSecret = NewPointer("")
+	}
+	if s.ConnectionTimeout == nil {
+		s.ConnectionTimeout = NewPointer(10)
+	}
+}
+
 type TaruviSettings struct {
 	Enable            *bool   `access:"authentication_taruvi"`
 	TaruviServerURL   *string `access:"authentication_taruvi"`
@@ -4020,7 +4050,8 @@ type Config struct {
 	ComplianceSettings          ComplianceSettings
 	LocalizationSettings        LocalizationSettings
 	SamlSettings                SamlSettings
-	TaruviSettings              TaruviSettings
+	KeycloakSettings              KeycloakSettings
+	TaruviSettings                TaruviSettings
 	NativeAppSettings           NativeAppSettings
 	IntuneSettings              IntuneSettings
 	CacheSettings               CacheSettings
@@ -4108,6 +4139,7 @@ func (o *Config) SetDefaults() {
 
 	o.LdapSettings.SetDefaults()
 	o.SamlSettings.SetDefaults()
+	o.KeycloakSettings.SetDefaults()
 	o.TaruviSettings.SetDefaults()
 
 	if o.TeamSettings.TeammateNameDisplay == nil {
