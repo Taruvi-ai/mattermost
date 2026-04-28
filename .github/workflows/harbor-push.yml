@@ -1,10 +1,20 @@
-name: Build and Push to Harbor
+name: Build and Push to Harbor Taruvi
 
 on:
   push:
     branches:
       - mattermost-taruvi
+      - mattermost-taruviprod
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
 
 jobs:
   build-and-push:
@@ -13,7 +23,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Fetch secrets from Infisical
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
@@ -23,11 +32,6 @@ jobs:
           project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
           secret-path: /Mattermost
           domain: "https://environment.eoxvantage.com"
-
-      - name: Create .env file for Docker build
-        run: |
-          printenv | grep -E '^(MM_|HARBOR_|AWS_|ALLOW|API_)' > .env
-          cat .env
 
       - name: Login to Harbor
         uses: docker/login-action@v3
@@ -42,11 +46,79 @@ jobs:
       - name: Build and Push
         uses: docker/build-push-action@v6
         with:
-          context: server/build
-          file: server/build/Dockerfile
           push: true
-          cache-from: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache
-          cache-to: type=registry,ref=repo.eoxvantage.com/taruvi/mattermost:buildcache,mode=max
+          no-cache: true
           tags: |
-            repo.eoxvantage.com/taruvi/mattermost:latest
+            repo.eoxvantage.com/taruvi/mattermost:${{ github.ref_name }}
             repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/mattermost-taruvi') || github.event.inputs.environment == 'staging'
+    steps:
+      - name: Get environment variables from Infisical
+        uses: Infisical/secrets-action@v1.0.7
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          env-slug: taruvi-test
+          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
+          secret-path: /Mattermost
+          domain: "https://environment.eoxvantage.com"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kube config
+        run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+
+      - name: Create/Update Infisical Secret
+        run: |
+          printenv | grep '^MM_' > /tmp/mm.env
+          kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+          
+      - name: Restart Mattermost deployment
+        run: |
+          kubectl rollout restart deployment mattermost-staging -n mattermost
+          kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
+
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/mattermost-taruviprod') || github.event.inputs.environment == 'production'
+    environment: production
+    steps:
+      - name: Get environment variables from Infisical
+        uses: Infisical/secrets-action@v1.0.7
+        with:
+          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
+          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
+          env-slug: taruvi-prod
+          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
+          secret-path: /Mattermost
+          domain: "https://environment.eoxvantage.com"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Update kube config
+        run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
+
+      - name: Create/Update Infisical Secret
+        run: |
+          printenv | grep '^MM_' > /tmp/mm.env
+          kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
+      
+      - name: Restart Mattermost deployment
+        run: |
+          kubectl rollout restart deployment mattermost-production -n mattermost
+          kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost

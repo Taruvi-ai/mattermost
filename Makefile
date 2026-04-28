@@ -28,11 +28,7 @@ setup:
 	@cp -n .env.example .env 2>/dev/null || true
 	@echo "Cleaning previous build..."
 	@docker compose down -v 2>/dev/null || true
-	@echo "Installing webapp dependencies..."
-	@cd webapp && npm i
-	@echo "Building webapp..."
-	@cd webapp && npm run build
-	@echo "Building server (this may take a few minutes)..."
+	@echo "Building Docker image (includes webapp + server)..."
 	@docker compose build --no-cache
 	@echo ""
 	@echo "✓ Setup complete! Run 'make dev' to begin."
