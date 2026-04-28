@@ -18,7 +18,7 @@ import (
 )
 
 type TaruviInterface interface {
-	AuthenticateUser(rctx request.CTX, username, password string) (*model.TaruviAuthResponse, *model.AppError)
+	AuthenticateUser(rctx request.CTX, username, password, authType string) (*model.TaruviAuthResponse, *model.AppError)
 }
 
 type TaruviProvider struct {
@@ -29,7 +29,12 @@ func (a *App) Taruvi() TaruviInterface {
 	return &TaruviProvider{app: a}
 }
 
-func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password string) (*model.TaruviAuthResponse, *model.AppError) {
+func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password, authType string) (*model.TaruviAuthResponse, *model.AppError) {
+	if authType == "session" {
+		rctx.Logger().Info("Using session token authentication")
+		return tp.validateSessionToken(rctx, password)
+	}
+
 	// Check if password is a JWT token (starts with "eyJ")
 	rctx.Logger().Info("Checking password format", 
 		mlog.Int("password_length", len(password)),
@@ -254,11 +259,14 @@ func (tp *TaruviProvider) getUserInfoWithToken(rctx request.CTX, token string) (
 		return nil, model.NewAppError("TaruviProvider.getUserInfoWithToken", "api.taruvi.get_user.request_failed", nil, fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)), http.StatusUnauthorized)
 	}
 
-	var userResp model.TaruviUserResponse
-	if err := json.Unmarshal(body, &userResp); err != nil {
+	var rawResp struct {
+		Data model.TaruviUserResponse `json:"data"`
+	}
+	if err := json.Unmarshal(body, &rawResp); err != nil {
 		rctx.Logger().Error("Failed to parse Taruvi user response", mlog.Err(err))
 		return nil, model.NewAppError("TaruviProvider.getUserInfoWithToken", "api.taruvi.get_user.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
+	userResp := rawResp.Data
 
 	// Convert TaruviUserResponse to TaruviAuthResponse format
 	authResp := &model.TaruviAuthResponse{}
@@ -268,4 +276,60 @@ func (tp *TaruviProvider) getUserInfoWithToken(rctx request.CTX, token string) (
 	authResp.Data.User.Display = userResp.FirstName + " " + userResp.LastName
 
 	return authResp, nil
+}
+
+// validateSessionToken validates a Taruvi allauth session token by calling the session endpoint.
+func (tp *TaruviProvider) validateSessionToken(rctx request.CTX, sessionToken string) (*model.TaruviAuthResponse, *model.AppError) {
+	config := tp.app.Config()
+	serverURL := *config.TaruviSettings.TaruviServerURL
+	sessionEndpoint := *config.TaruviSettings.SessionEndpoint
+	timeout := time.Duration(*config.TaruviSettings.ConnectionTimeout) * time.Second
+
+	url := serverURL + sessionEndpoint
+
+	rctx.Logger().Info("Taruvi session token validation request", mlog.String("url", url))
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.request_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+
+	req.Header.Set("X-Session-Token", sessionToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	if config.TaruviSettings.OverrideHost != nil && *config.TaruviSettings.OverrideHost {
+		hostValue := *config.TaruviSettings.HostOverrideValue
+		if hostValue != "" {
+			req.Host = hostValue
+		}
+	}
+
+	client := &http.Client{Timeout: timeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		rctx.Logger().Error("Failed to validate session token with Taruvi", mlog.Err(err))
+		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.connection_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+
+	rctx.Logger().Info("Taruvi session validation response",
+		mlog.Int("status_code", resp.StatusCode),
+		mlog.String("response_body", string(body)))
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.invalid_token", nil, fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)), http.StatusUnauthorized)
+	}
+
+	var authResp model.TaruviAuthResponse
+	if err := json.Unmarshal(body, &authResp); err != nil {
+		rctx.Logger().Error("Failed to parse Taruvi session response", mlog.Err(err))
+		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.unmarshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+
+	return &authResp, nil
 }

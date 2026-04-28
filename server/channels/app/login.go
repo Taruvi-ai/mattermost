@@ -37,7 +37,7 @@ func hashTaruviUsername(username string) string {
 	return hex.EncodeToString(md5Hash[:])
 }
 
-func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken string, ldapOnly bool) (user *model.User, err *model.AppError) {
+func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken, authType string, ldapOnly bool) (user *model.User, err *model.AppError) {
 	// Do statistics
 	defer func() {
 		if a.Metrics() != nil {
@@ -93,8 +93,20 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 			"api.user.login_by_cws.invalid_token.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	// Authenticate via Keycloak or Taruvi (Keycloak takes priority)
-	if *a.Config().KeycloakSettings.Enable {
+	// Authenticate via Taruvi session token, Keycloak, or Taruvi password/JWT
+	if authType == "session" || !*a.Config().KeycloakSettings.Enable {
+		// Session token always goes to Taruvi; password/JWT goes to Taruvi when Keycloak is disabled
+		rctx.Logger().Info("Starting Taruvi authentication",
+			mlog.String("login_id", loginId), mlog.String("auth_type", authType))
+
+		authResp, err := a.authenticateWithTaruvi(rctx, loginId, password, authType)
+		if err != nil {
+			return nil, err
+		}
+
+		rctx.Logger().Info("Taruvi authentication successful",
+			mlog.String("taruvi_username", authResp.Data.User.Username))
+	} else {
 		rctx.Logger().Info("Starting Keycloak authentication", mlog.String("login_id", loginId))
 
 		kcUser, err := a.Keycloak().AuthenticateUser(rctx, loginId, password)
@@ -106,17 +118,6 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 		rctx.Logger().Info("Keycloak authentication successful",
 			mlog.String("keycloak_email", kcUser.Email),
 			mlog.String("keycloak_username", kcUser.PreferredUsername))
-	} else {
-		rctx.Logger().Info("Starting Taruvi authentication", mlog.String("login_id", loginId))
-
-		authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password)
-		if err != nil {
-			rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
-			return nil, err
-		}
-
-		rctx.Logger().Info("Taruvi authentication successful",
-			mlog.String("taruvi_username", authResp.Data.User.Username))
 	}
 
 	// Look up the pre-created MM user by loginId
@@ -145,6 +146,31 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 	}
 
 	return user, nil
+}
+
+// authenticateWithTaruvi calls Taruvi to authenticate and verifies loginId matches the response.
+func (a *App) authenticateWithTaruvi(rctx request.CTX, loginId, password, authType string) (*model.TaruviAuthResponse, *model.AppError) {
+	authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password, authType)
+	if err != nil {
+		rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
+		return nil, err
+	}
+
+	// Verify loginId matches the authenticated Taruvi user
+	taruviEmail := strings.ToLower(authResp.Data.User.Email)
+	taruviUsername := strings.ToLower(authResp.Data.User.Username)
+	normalizedLoginId := strings.ToLower(loginId)
+
+	if normalizedLoginId != taruviEmail && normalizedLoginId != taruviUsername {
+		rctx.Logger().Error("Login ID mismatch with Taruvi user",
+			mlog.String("login_id", loginId),
+			mlog.String("taruvi_email", taruviEmail),
+			mlog.String("taruvi_username", taruviUsername))
+		return nil, model.NewAppError("authenticateWithTaruvi",
+			"api.user.login.invalid_credentials_email_username", nil, "", http.StatusUnauthorized)
+	}
+
+	return authResp, nil
 }
 
 func (a *App) GetUserForLogin(rctx request.CTX, id, loginId string) (*model.User, *model.AppError) {

@@ -29,7 +29,7 @@ func TestCWSLogin(t *testing.T) {
 		}()
 
 		os.Setenv("CWS_CLOUD_TOKEN", token.Token)
-		user, appErr := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, false)
+		user, appErr := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, "", false)
 		require.Nil(t, appErr)
 		require.NotNil(t, user)
 		require.Equal(t, th.BasicUser.Username, user.Username)
@@ -48,7 +48,7 @@ func TestCWSLogin(t *testing.T) {
 			require.Nil(t, appErr)
 		}()
 
-		user, err := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, false)
+		user, err := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, "", false)
 		require.NotNil(t, err)
 		require.Nil(t, user)
 	})

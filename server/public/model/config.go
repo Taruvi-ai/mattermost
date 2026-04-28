@@ -3088,6 +3088,7 @@ type TaruviSettings struct {
 	AuthEndpoint      *string `access:"authentication_taruvi"`
 	UserEndpoint      *string `access:"authentication_taruvi"`
 	VerifyEndpoint    *string `access:"authentication_taruvi"`
+	SessionEndpoint   *string `access:"authentication_taruvi"`
 	ConnectionTimeout *int    `access:"authentication_taruvi"`
 	OverrideHost      *bool   `access:"authentication_taruvi"`
 	HostOverrideValue *string `access:"authentication_taruvi"`
@@ -3119,6 +3120,12 @@ func (s *TaruviSettings) SetDefaults() {
 		s.VerifyEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_VERIFYENDPOINT"))
 		if *s.VerifyEndpoint == "" {
 			s.VerifyEndpoint = NewPointer("/api/auth/jwt/token/verify/")
+		}
+	}
+	if s.SessionEndpoint == nil {
+		s.SessionEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_SESSIONENDPOINT"))
+		if *s.SessionEndpoint == "" {
+			s.SessionEndpoint = NewPointer("/_allauth/app/v1/auth/session")
 		}
 	}
 	if s.ConnectionTimeout == nil {

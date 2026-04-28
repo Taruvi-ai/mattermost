@@ -17,7 +17,7 @@ type TaruviAuthResponse struct {
 	Status int `json:"status"`
 	Data   struct {
 		User struct {
-			ID       int    `json:"id"`
+			ID       string `json:"id"`
 			Display  string `json:"display"`
 			Email    string `json:"email"`
 			Username string `json:"username"`
@@ -34,7 +34,7 @@ type TaruviAuthResponse struct {
 }
 
 type TaruviUserResponse struct {
-	ID        int    `json:"id"`
+	ID        string `json:"id"`
 	UUID      string `json:"uuid"`
 	Username  string `json:"username"`
 	Email     string `json:"email"`
