@@ -82,9 +82,10 @@ jobs:
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
           
-      - name: Restart Mattermost deployment
+      - name: Deploy Mattermost staging
         run: |
-          kubectl rollout restart deployment mattermost-staging -n mattermost
+          kubectl patch mattermost mattermost-staging -n mattermost --type='json' \
+            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
           kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
 
   deploy-production:
