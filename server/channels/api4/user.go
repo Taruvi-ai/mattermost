@@ -2549,7 +2549,7 @@ func attachDeviceId(c *Context, w http.ResponseWriter, r *http.Request, deviceId
 		Secure:   secure,
 	}
 
-	if secure && utils.CheckEmbeddedCookie(r) {
+	if secure {
 		sessionCookie.SameSite = http.SameSiteNoneMode
 	}
 
