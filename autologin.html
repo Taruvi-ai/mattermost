@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+  window.addEventListener("message", function(e) {
+    var allowed = e.origin.endsWith(".taruvi.space") || e.origin.endsWith(".taruvi.app");
+    if (!allowed || !e.data || e.data.type !== "mm-login") return;
+
+    fetch("/api/v4/users/login", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        login_id: e.data.loginId,
+        password: e.data.token,
+        auth_type: "session"
+      })
+    }).then(function(r) {
+      if (r.ok) {
+        window.location.href = "/";
+      } else {
+        window.parent.postMessage({ type: "mm-login-failed" }, e.origin);
+      }
+    }).catch(function() {
+      window.parent.postMessage({ type: "mm-login-failed" }, e.origin);
+    });
+  });
+
+  window.parent.postMessage({ type: "mm-bridge-ready" }, "*");
+</script>
+</body>
+</html>
