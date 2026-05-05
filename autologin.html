@@ -10,7 +10,10 @@
     fetch("/api/v4/users/login", {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
       body: JSON.stringify({
         login_id: e.data.loginId,
         password: e.data.token,
