@@ -1,5 +1,5 @@
 # Stage 1: Build server from source
-FROM golang:1.24 AS builder
+FROM golang:1.25 AS builder
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Build tools for server
