@@ -31,18 +31,13 @@ const cwsTokenEnv = "CWS_CLOUD_TOKEN"
 
 // hashTaruviUsername hashes the Taruvi username using SHA256 then MD5
 func hashTaruviUsername(username string) string {
-	// First: SHA256 hash of username
 	sha256Hash := sha256.Sum256([]byte(username))
 	sha256Hex := hex.EncodeToString(sha256Hash[:])
-
-	// Second: MD5 hash of the SHA256 hash
 	md5Hash := md5.Sum([]byte(sha256Hex))
-	md5Hex := hex.EncodeToString(md5Hash[:])
-
-	return md5Hex
+	return hex.EncodeToString(md5Hash[:])
 }
 
-func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken string, ldapOnly bool) (user *model.User, err *model.AppError) {
+func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken, authType string, ldapOnly bool) (user *model.User, err *model.AppError) {
 	// Do statistics
 	defer func() {
 		if a.Metrics() != nil {
@@ -98,23 +93,34 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 			"api.user.login_by_cws.invalid_token.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	rctx.Logger().Info("Starting Taruvi authentication", mlog.String("login_id", loginId))
+	// Authenticate via Taruvi session token, Keycloak, or Taruvi password/JWT
+	if authType == "session" || !*a.Config().KeycloakSettings.Enable {
+		// Session token always goes to Taruvi; password/JWT goes to Taruvi when Keycloak is disabled
+		rctx.Logger().Info("Starting Taruvi authentication",
+			mlog.String("login_id", loginId), mlog.String("auth_type", authType))
 
-	// Taruvi authentication (always enabled)
-	authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password)
-	if err != nil {
-		rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
-		return nil, err
+		authResp, err := a.authenticateWithTaruvi(rctx, loginId, password, authType)
+		if err != nil {
+			return nil, err
+		}
+
+		rctx.Logger().Info("Taruvi authentication successful",
+			mlog.String("taruvi_username", authResp.Data.User.Username))
+	} else {
+		rctx.Logger().Info("Starting Keycloak authentication", mlog.String("login_id", loginId))
+
+		kcUser, err := a.Keycloak().AuthenticateUser(rctx, loginId, password)
+		if err != nil {
+			rctx.Logger().Error("Keycloak authentication failed", mlog.Err(err))
+			return nil, err
+		}
+
+		rctx.Logger().Info("Keycloak authentication successful",
+			mlog.String("keycloak_email", kcUser.Email),
+			mlog.String("keycloak_username", kcUser.PreferredUsername))
 	}
 
-	rctx.Logger().Info("Taruvi authentication successful", 
-		mlog.String("taruvi_username", authResp.Data.User.Username))
-
-
-	// taruviUsername := authResp.Data.User.Username
-	// md5Hash := hashTaruviUsername(taruviUsername)
-
-	// Now get the MM user
+	// Look up the pre-created MM user by loginId
 	user, err = a.GetUserForLogin(rctx, id, loginId)
 	if err != nil {
 		rctx.Logger().Error("GetUserForLogin failed",
@@ -123,14 +129,6 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 			mlog.Err(err))
 		return nil, err
 	}
-
-	// Check password using the MD5 hash
-	// Mattermost will compare this against the PHC-hashed password in DB
-	// if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, md5Hash, mfaToken); err != nil {
-	// 	rctx.Logger().Error("CheckPasswordAndAllCriteria failed", mlog.Err(err))
-	// 	return nil, model.NewAppError("AuthenticateUserForLogin",
-	// 		"api.user.login.invalid_credentials.app_error", nil, "", http.StatusUnauthorized)
-	// }
 
 	if err := checkUserNotBot(user); err != nil {
 		return nil, err
@@ -150,9 +148,34 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 	return user, nil
 }
 
+// authenticateWithTaruvi calls Taruvi to authenticate and verifies loginId matches the response.
+func (a *App) authenticateWithTaruvi(rctx request.CTX, loginId, password, authType string) (*model.TaruviAuthResponse, *model.AppError) {
+	authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password, authType)
+	if err != nil {
+		rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
+		return nil, err
+	}
+
+	// Verify loginId matches the authenticated Taruvi user
+	taruviEmail := strings.ToLower(authResp.Data.User.Email)
+	taruviUsername := strings.ToLower(authResp.Data.User.Username)
+	normalizedLoginId := strings.ToLower(loginId)
+
+	if normalizedLoginId != taruviEmail && normalizedLoginId != taruviUsername {
+		rctx.Logger().Error("Login ID mismatch with Taruvi user",
+			mlog.String("login_id", loginId),
+			mlog.String("taruvi_email", taruviEmail),
+			mlog.String("taruvi_username", taruviUsername))
+		return nil, model.NewAppError("authenticateWithTaruvi",
+			"api.user.login.invalid_credentials_email_username", nil, "", http.StatusUnauthorized)
+	}
+
+	return authResp, nil
+}
+
 func (a *App) GetUserForLogin(rctx request.CTX, id, loginId string) (*model.User, *model.AppError) {
-	enableUsername := *a.Config().EmailSettings.EnableSignInWithUsername
-	enableEmail := *a.Config().EmailSettings.EnableSignInWithEmail
+	enableUsername := true
+	enableEmail := true
 
 	if enableEmail || enableUsername {
 		// If we are given a userID then fail if we can't find a user with that ID
@@ -358,7 +381,7 @@ func (a *App) AttachSessionCookies(rctx request.CTX, w http.ResponseWriter, r *h
 		Secure:  secure,
 	}
 
-	if secure && utils.CheckEmbeddedCookie(r) {
+	if secure {
 		sessionCookie.SameSite = http.SameSiteNoneMode
 		userCookie.SameSite = http.SameSiteNoneMode
 		csrfCookie.SameSite = http.SameSiteNoneMode

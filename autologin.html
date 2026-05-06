@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background: #1e1e2e;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  button {
+    padding: 12px 28px;
+    font-size: 15px;
+    font-weight: 500;
+    background: #1565c0;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: none;
+  }
+  button:hover { background: #1976d2; }
+</style>
+</head>
+<body>
+<button id="btn" onclick="connect()">Open Chat</button>
+<script>
+  var pending = null;
+
+  window.addEventListener("message", function(e) {
+    var ok = e.origin.endsWith(".taruvi.space") || e.origin.endsWith(".taruvi.app");
+    if (!ok || !e.data || e.data.type !== "mm-login") return;
+    pending = e.data;
+    document.getElementById("btn").style.display = "block";
+  });
+
+  function doLogin() {
+    fetch("/api/v4/users/login", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+      },
+      body: JSON.stringify({
+        login_id: pending.loginId,
+        password: pending.token,
+        auth_type: "session"
+      })
+    }).then(function(r) {
+      if (r.ok) {
+        window.location.href = "/";
+      } else {
+        window.parent.postMessage({ type: "mm-login-failed" }, pending.origin || "*");
+      }
+    }).catch(function() {
+      window.parent.postMessage({ type: "mm-login-failed" }, pending.origin || "*");
+    });
+  }
+
+  function connect() {
+    if (document.requestStorageAccess) {
+      document.requestStorageAccess().then(doLogin).catch(doLogin);
+    } else {
+      doLogin();
+    }
+  }
+
+  window.parent.postMessage({ type: "mm-bridge-ready" }, "*");
+</script>
+</body>
+</html>

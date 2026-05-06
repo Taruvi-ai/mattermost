@@ -62,6 +62,9 @@ COPY --from=release --chown=2000:2000 /mattermost /mattermost
 COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mattermost /mattermost/bin/mattermost
 COPY --from=builder --chown=2000:2000 /mattermost/server/bin/mmctl /mattermost/bin/mmctl
 
+# Add autologin bridge page for cross-origin iframe authentication
+COPY --chown=2000:2000 autologin.html /mattermost/client/autologin.html
+
 # Create required directories
 RUN mkdir -p /mattermost/data /mattermost/logs /mattermost/plugins /mattermost/client/plugins /mattermost/.postgresql \
     && chmod 700 /mattermost/.postgresql \

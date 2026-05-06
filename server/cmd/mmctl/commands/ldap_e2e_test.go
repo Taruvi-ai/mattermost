@@ -94,7 +94,7 @@ func (s *MmctlE2ETestSuite) TestLdapIDMigrateCmd() {
 	// dn: uid=dev.one,ou=testusers,dc=mm,dc=test,dc=com
 	// cn: Dev1
 	// userPassword: Password1
-	ldapUser, appErr := s.th.App.AuthenticateUserForLogin(s.th.Context, "", "dev.one", "Password1", "", "", true)
+	ldapUser, appErr := s.th.App.AuthenticateUserForLogin(s.th.Context, "", "dev.one", "Password1", "", "", "", true)
 	s.Require().Nil(appErr)
 	s.Require().NotNil(ldapUser)
 	s.Require().Equal(model.UserAuthServiceLdap, ldapUser.AuthService)
