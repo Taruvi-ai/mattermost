@@ -11,7 +11,7 @@
 // Group: @channels @system_console @authentication
 
 import * as TIMEOUTS from '../../../fixtures/timeouts';
-import {reUrl, getRandomId} from '../../../utils';
+import {reUrl, getRandomId, newTestPassword} from '../../../utils';
 
 describe('Authentication', () => {
     let testUser;
@@ -117,9 +117,10 @@ describe('Authentication', () => {
 
             cy.apiUpdateConfig(newConfig);
 
-            // * Ensure password has a minimum length of 8 and no password requirements are checked
+            // * Ensure password has the default minimum length and no password requirements are checked
+            // Note: default MinimumLength is 8 on non-FIPS builds and 14 on FIPS builds
             cy.apiGetConfig().then(({config: {PasswordSettings}}) => {
-                expect(PasswordSettings.MinimumLength).equal(8);
+                expect(PasswordSettings.MinimumLength).to.be.oneOf([8, 14]);
                 expect(PasswordSettings.Lowercase).equal(false);
                 expect(PasswordSettings.Number).equal(false);
                 expect(PasswordSettings.Uppercase).equal(false);
@@ -129,7 +130,9 @@ describe('Authentication', () => {
             cy.visit('/admin_console/authentication/password');
             cy.get('.admin-console__header').should('be.visible').and('have.text', 'Password');
 
-            cy.findByTestId('passwordMinimumLengthinput').should('be.visible').and('have.value', '8');
+            cy.findByTestId('passwordMinimumLengthinput').should('be.visible').invoke('val').then((val) => {
+                expect(val).to.be.oneOf(['8', '14']);
+            });
             cy.findByText('At least one lowercase letter').siblings().should('not.be.checked');
             cy.findByText('At least one uppercase letter').siblings().should('not.be.checked');
             cy.findByText('At least one number').siblings().should('not.be.checked');
@@ -147,11 +150,13 @@ describe('Authentication', () => {
 
         cy.get('#input_email', {timeout: TIMEOUTS.ONE_MIN}).type(`test-${getRandomId()}@example.com`);
 
-        cy.get('#input_password-input').type('Test123456!');
+        cy.get('#input_password-input').type(newTestPassword());
+
+        cy.get('#signup-body-card-form-check-terms-and-privacy').check();
 
         ['1user', 'te', 'user#1', 'user!1'].forEach((option) => {
             cy.get('#input_name').clear().type(option);
-            cy.findByText('Create Account').click();
+            cy.findByText('Create account').click();
 
             // * Assert the error is what is expected;
             cy.get('.Input___error').scrollIntoView().should('be.visible');
@@ -179,11 +184,13 @@ describe('Authentication', () => {
 
         cy.get('#input_email', {timeout: TIMEOUTS.ONE_MIN}).type(`test-${getRandomId()}@example.com`);
 
-        cy.get('#input_password-input').type('Test123456!');
+        cy.get('#input_password-input').type(newTestPassword());
 
         cy.get('#input_name').clear().type(`Test${getRandomId()}`);
 
-        cy.findByText('Create Account').click();
+        cy.get('#signup-body-card-form-check-terms-and-privacy').check();
+
+        cy.findByText('Create account').click();
 
         // * Make sure account was created successfully and we are on the team joining page
         cy.findByText('Teams you can join:', {timeout: TIMEOUTS.ONE_MIN}).should('be.visible');
@@ -241,11 +248,13 @@ describe('Authentication', () => {
 
         cy.get('#input_email', {timeout: TIMEOUTS.ONE_MIN}).type(`test-${getRandomId()}@example.com`);
 
-        cy.get('#input_password-input').type('Test123456!');
+        cy.get('#input_password-input').type(newTestPassword());
 
         cy.get('#input_name').clear().type(`Test${getRandomId()}`);
 
-        cy.findByText('Create Account').click();
+        cy.get('#signup-body-card-form-check-terms-and-privacy').check();
+
+        cy.findByText('Create account').click();
 
         // * Make sure account was not created successfully
         cy.get('.AlertBanner__title').scrollIntoView().should('be.visible');
@@ -271,7 +280,7 @@ describe('Authentication', () => {
         cy.findByText('Copy invite link').click();
 
         // # Input email, select member
-        cy.findByLabelText('Add or Invite People').type(`test-${getRandomId()}@mattermost.com{downarrow}{downarrow}{enter}`, {force: true});
+        cy.findByLabelText('Invite People').type(`test-${getRandomId()}@mattermost.com{downarrow}{downarrow}{enter}`, {force: true});
 
         // # Click invite members button
         cy.findByRole('button', {name: 'Invite'}).click({force: true});
