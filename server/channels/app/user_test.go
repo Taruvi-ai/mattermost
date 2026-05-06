@@ -71,9 +71,11 @@ func TestCreateOAuthUser(t *testing.T) {
 
 		// mock oAuth Provider, return data
 		mockUser := &model.User{Id: "abcdef", AuthData: model.NewPointer("e7110007-64be-43d8-9840-4a7e9c26b710"), Email: dbUser.Email}
+		mockSSOSettings := &model.SSOSettings{}
 		providerMock := &mocks.OAuthProvider{}
 		providerMock.On("IsSameUser", mock.AnythingOfType("*request.Context"), mock.Anything, mock.Anything).Return(true)
-		providerMock.On("GetUserFromJSON", mock.AnythingOfType("*request.Context"), mock.Anything, mock.Anything).Return(mockUser, nil)
+		providerMock.On("GetUserFromJSON", mock.AnythingOfType("*request.Context"), mock.Anything, mock.Anything, mock.Anything).Return(mockUser, nil)
+		providerMock.On("GetSSOSettings", mock.AnythingOfType("*request.Context"), mock.Anything, mock.Anything).Return(mockSSOSettings, nil)
 		einterfaces.RegisterOAuthProvider(model.ServiceOffice365, providerMock)
 
 		// Update user to be OAuth, formatting to match Office365 OAuth data
@@ -293,7 +295,7 @@ func TestCreateUser(t *testing.T) {
 			Email:         "success+" + id + "@simulator.amazonses.com",
 			Username:      *group.Name,
 			Nickname:      "nn_" + id,
-			Password:      "Password1",
+			Password:      model.NewTestPassword(),
 			EmailVerified: true,
 		}
 
@@ -337,7 +339,7 @@ func TestCreateUser(t *testing.T) {
 			Email:       model.NewId() + "success+test@example.com",
 			Nickname:    "Darth Vader",
 			Username:    "vader" + model.NewId(),
-			Password:    "passwd12345",
+			Password:    model.NewTestPassword(),
 			AuthService: "",
 		}
 		_, err := th.App.CreateUser(th.Context, user)
@@ -771,7 +773,7 @@ func TestGetUsersByStatus(t *testing.T) {
 			Email:    "success+" + id + "@simulator.amazonses.com",
 			Username: "un_" + username + "_" + id,
 			Nickname: "nn_" + id,
-			Password: "Password1",
+			Password: model.NewTestPassword(),
 		})
 		require.Nil(t, err, "failed to create user: %v", err)
 
@@ -1003,7 +1005,7 @@ func TestCreateUserWithInviteId(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
 
-	user := model.User{Email: strings.ToLower(model.NewId()) + "success+test@example.com", Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: "passwd1", AuthService: ""}
+	user := model.User{Email: strings.ToLower(model.NewId()) + "success+test@example.com", Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 
 	t.Run("should create a user", func(t *testing.T) {
 		u, err := th.App.CreateUserWithInviteId(th.Context, &user, th.BasicTeam.InviteId, "")
@@ -1034,7 +1036,7 @@ func TestCreateUserWithToken(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
 
-	user := model.User{Email: strings.ToLower(model.NewId()) + "success+test@example.com", Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: "passwd1", AuthService: ""}
+	user := model.User{Email: strings.ToLower(model.NewId()) + "success+test@example.com", Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 
 	t.Run("invalid token", func(t *testing.T) {
 		_, err := th.App.CreateUserWithToken(th.Context, &user, &model.Token{Token: "123"})
@@ -1098,7 +1100,7 @@ func TestCreateUserWithToken(t *testing.T) {
 
 	t.Run("valid regular user request", func(t *testing.T) {
 		invitationEmail := strings.ToLower(model.NewId()) + "other-email@test.com"
-		u := model.User{Email: invitationEmail, Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: "passwd1", AuthService: ""}
+		u := model.User{Email: invitationEmail, Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 		token := model.NewToken(
 			model.TokenTypeTeamInvitation,
 			model.MapToJSON(map[string]string{"teamId": th.BasicTeam.Id, "email": invitationEmail}),
@@ -1125,7 +1127,7 @@ func TestCreateUserWithToken(t *testing.T) {
 		)
 
 		require.NoError(t, th.App.Srv().Store().Token().Save(token))
-		guest := model.User{Email: invitationEmail, Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: "passwd1", AuthService: ""}
+		guest := model.User{Email: invitationEmail, Nickname: "Darth Vader", Username: "vader" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 		newGuest, err := th.App.CreateUserWithToken(th.Context, &guest, token)
 		require.Nil(t, err, "Should add user to the team. err=%v", err)
 
@@ -1164,7 +1166,7 @@ func TestCreateUserWithToken(t *testing.T) {
 			Email:       forbiddenInvitationEmail,
 			Nickname:    "Darth Vader",
 			Username:    "vader" + model.NewId(),
-			Password:    "passwd1",
+			Password:    model.NewTestPassword(),
 			AuthService: "",
 		}
 		newGuest, err := th.App.CreateUserWithToken(th.Context, &guest, forbiddenDomainToken)
@@ -1210,7 +1212,7 @@ func TestCreateUserWithToken(t *testing.T) {
 			Email:       invitationEmail,
 			Nickname:    "Darth Vader",
 			Username:    "vader" + model.NewId(),
-			Password:    "passwd1",
+			Password:    model.NewTestPassword(),
 			AuthService: "",
 		}
 		newGuest, err := th.App.CreateUserWithToken(th.Context, &guest, token)
@@ -1245,7 +1247,7 @@ func TestCreateUserWithToken(t *testing.T) {
 		)
 		require.NoError(t, th.App.Srv().Store().Token().Save(token))
 
-		guest := model.User{Email: invitationEmail, Nickname: "Magic Link Guest", Username: "magiclinkguest" + model.NewId(), Password: "passwd1", AuthService: ""}
+		guest := model.User{Email: invitationEmail, Nickname: "Magic Link Guest", Username: "magiclinkguest" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 		newGuest, err := th.App.CreateUserWithToken(th.Context, &guest, token)
 		require.Nil(t, err, "Should create guest user successfully")
 		require.True(t, newGuest.IsGuest())
@@ -1294,7 +1296,7 @@ func TestCreateUserWithToken(t *testing.T) {
 		)
 		require.NoError(t, th.App.Srv().Store().Token().Save(token))
 
-		guest := model.User{Email: invitationEmail, Nickname: "Magic Link Guest", Username: "magiclinkguest" + model.NewId(), Password: "passwd1", AuthService: ""}
+		guest := model.User{Email: invitationEmail, Nickname: "Magic Link Guest", Username: "magiclinkguest" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 		newGuest, err := th.App.CreateUserWithToken(th.Context, &guest, token)
 		require.Nil(t, err)
 
@@ -1328,7 +1330,7 @@ func TestCreateUserWithToken(t *testing.T) {
 		)
 		require.NoError(t, th.App.Srv().Store().Token().Save(token))
 
-		regularUser := model.User{Email: invitationEmail, Nickname: "Regular User", Username: "regular" + model.NewId(), Password: "passwd1", AuthService: ""}
+		regularUser := model.User{Email: invitationEmail, Nickname: "Regular User", Username: "regular" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
 		newUser, err := th.App.CreateUserWithToken(th.Context, &regularUser, token)
 		require.Nil(t, err)
 		require.False(t, newUser.IsGuest())
@@ -1459,7 +1461,7 @@ func TestPasswordRecovery(t *testing.T) {
 		assert.Equal(t, th.BasicUser.Id, tokenData.UserID)
 		assert.Equal(t, th.BasicUser.Email, tokenData.Email)
 
-		err = th.App.ResetPasswordFromToken(th.Context, token.Token, "abcdefgh")
+		err = th.App.ResetPasswordFromToken(th.Context, token.Token, model.NewTestPassword())
 		assert.Nil(t, err)
 	})
 
@@ -1475,7 +1477,7 @@ func TestPasswordRecovery(t *testing.T) {
 		_, err = th.App.UpdateUser(th.Context, th.BasicUser, false)
 		assert.Nil(t, err)
 
-		err = th.App.ResetPasswordFromToken(th.Context, token.Token, "abcdefgh")
+		err = th.App.ResetPasswordFromToken(th.Context, token.Token, model.NewTestPassword())
 		assert.NotNil(t, err)
 	})
 
@@ -1483,7 +1485,7 @@ func TestPasswordRecovery(t *testing.T) {
 		token, err := th.App.CreatePasswordRecoveryToken(th.Context, th.BasicUser.Id, th.BasicUser.Email)
 		assert.Nil(t, err)
 
-		err = th.App.resetPasswordFromToken(th.Context, token.Token, "abcdefgh", model.GetMillis())
+		err = th.App.resetPasswordFromToken(th.Context, token.Token, model.NewTestPassword(), model.GetMillis())
 		assert.Nil(t, err)
 	})
 
@@ -1491,7 +1493,7 @@ func TestPasswordRecovery(t *testing.T) {
 		token, err := th.App.CreatePasswordRecoveryToken(th.Context, th.BasicUser.Id, th.BasicUser.Email)
 		assert.Nil(t, err)
 
-		err = th.App.resetPasswordFromToken(th.Context, token.Token, "abcdefgh", model.GetMillisForTime(time.Now().Add(25*time.Hour)))
+		err = th.App.resetPasswordFromToken(th.Context, token.Token, model.NewTestPassword(), model.GetMillisForTime(time.Now().Add(25*time.Hour)))
 		assert.NotNil(t, err)
 	})
 }
@@ -1558,7 +1560,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		th.Context.Session().UserId = th.BasicUser2.Id
 		th.Context.Session().Id = session.Id
 
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password2")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 
 		session, err = th.App.GetSession(session.Token)
@@ -1570,7 +1572,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		require.Nil(t, session2)
 
 		// Cleanup
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password1")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 		th.Context.Session().UserId = ""
 		th.Context.Session().Id = ""
@@ -1596,7 +1598,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		th.Context.Session().UserId = th.BasicUser2.Id
 		th.Context.Session().Id = session.Id
 
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password2")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 
 		session, err = th.App.GetSession(session.Token)
@@ -1608,7 +1610,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		require.False(t, session2.IsExpired())
 
 		// Cleanup
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password1")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 		th.Context.Session().UserId = ""
 		th.Context.Session().Id = ""
@@ -1631,7 +1633,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		})
 		require.Nil(t, err)
 
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password2")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 
 		session, err = th.App.GetSession(session.Token)
@@ -1643,7 +1645,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		require.Nil(t, session2)
 
 		// Cleanup
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password1")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 	})
 
@@ -1664,7 +1666,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		})
 		require.Nil(t, err)
 
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password2")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 
 		session, err = th.App.GetSession(session.Token)
@@ -1676,7 +1678,7 @@ func TestPasswordChangeSessionTermination(t *testing.T) {
 		require.False(t, session2.IsExpired())
 
 		// Cleanup
-		err = th.App.UpdatePassword(th.Context, th.BasicUser2, "Password1")
+		err = th.App.UpdatePassword(th.Context, th.BasicUser2, model.NewTestPassword())
 		require.Nil(t, err)
 	})
 }
@@ -2287,9 +2289,9 @@ func TestUpdateThreadReadForUser(t *testing.T) {
 			*cfg.ServiceSettings.CollapsedThreads = model.CollapsedThreadsDefaultOn
 		})
 
-		rootPost, appErr := th.App.CreatePost(th.Context, &model.Post{UserId: th.BasicUser2.Id, CreateAt: model.GetMillis(), ChannelId: th.BasicChannel.Id, Message: "hi"}, th.BasicChannel, model.CreatePostFlags{})
+		rootPost, _, appErr := th.App.CreatePost(th.Context, &model.Post{UserId: th.BasicUser2.Id, CreateAt: model.GetMillis(), ChannelId: th.BasicChannel.Id, Message: "hi"}, th.BasicChannel, model.CreatePostFlags{})
 		require.Nil(t, appErr)
-		replyPost, appErr := th.App.CreatePost(th.Context, &model.Post{RootId: rootPost.Id, UserId: th.BasicUser2.Id, CreateAt: model.GetMillis(), ChannelId: th.BasicChannel.Id, Message: "hi"}, th.BasicChannel, model.CreatePostFlags{})
+		replyPost, _, appErr := th.App.CreatePost(th.Context, &model.Post{RootId: rootPost.Id, UserId: th.BasicUser2.Id, CreateAt: model.GetMillis(), ChannelId: th.BasicChannel.Id, Message: "hi"}, th.BasicChannel, model.CreatePostFlags{})
 		require.Nil(t, appErr)
 		threads, appErr := th.App.GetThreadsForUser(th.Context, th.BasicUser.Id, th.BasicTeam.Id, model.GetUserThreadsOpts{})
 		require.Nil(t, appErr)
@@ -2685,14 +2687,17 @@ func TestAuthenticateUserForGuestMagicLink(t *testing.T) {
 		)
 		require.NoError(t, th.App.Srv().Store().Token().Save(token))
 		defer func() {
-			appErr := th.App.DeleteToken(token)
-			require.Nil(t, appErr)
+			_ = th.App.Srv().Store().Token().Delete(token.Token)
 		}()
 
 		user, err := th.App.AuthenticateUserForGuestMagicLink(th.Context, token.Token)
 		require.NotNil(t, err, "Should fail on wrong token type")
 		require.Nil(t, user)
-		assert.Equal(t, "api.user.guest_magic_link.invalid_token_type.app_error", err.Id)
+		assert.Equal(t, "api.user.guest_magic_link.invalid_token.app_error", err.Id)
+
+		// Verify token was NOT consumed (wrong type should not delete it)
+		_, nErr := th.App.Srv().Store().Token().GetByToken(token.Token)
+		require.NoError(t, nErr, "Token with wrong type should still exist")
 	})
 
 	t.Run("user already exists returns generic error", func(t *testing.T) {

@@ -1,6 +1,6 @@
 module github.com/mattermost/mattermost/server/public
 
-go 1.24.6
+go 1.25.8
 
 require (
 	github.com/blang/semver/v4 v4.0.0
@@ -18,7 +18,6 @@ require (
 	github.com/mattermost/gosaml2 v0.10.0
 	github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956
 	github.com/mattermost/logr/v2 v2.0.22
-	github.com/mattermost/mattermost/server/v8 v8.0.0-20251014075701-833e0125320d
 	github.com/nicksnyder/go-i18n/v2 v2.6.0
 	github.com/pborman/uuid v1.2.1
 	github.com/pkg/errors v0.9.1
@@ -52,7 +51,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
-	github.com/rogpeppe/go-internal v1.10.0 // indirect
+	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/russellhaering/goxmldsig v1.5.0 // indirect
 	github.com/stretchr/objx v0.5.3 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect

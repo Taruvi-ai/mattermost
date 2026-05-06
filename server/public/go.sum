@@ -122,8 +122,6 @@ github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956 h1:Y1Tu/swM31pVwwb
 github.com/mattermost/ldap v0.0.0-20231116144001-0f480c025956/go.mod h1:SRl30Lb7/QoYyohYeVBuqYvvmXSZJxZgiV3Zf6VbxjI=
 github.com/mattermost/logr/v2 v2.0.22 h1:npFkXlkAWR9J8payh8ftPcCZvLbHSI125mAM5/r/lP4=
 github.com/mattermost/logr/v2 v2.0.22/go.mod h1:0sUKpO+XNMZApeumaid7PYaUZPBIydfuWZ0dqixXo+s=
-github.com/mattermost/mattermost/server/v8 v8.0.0-20251014075701-833e0125320d h1:etRyN6FNd6fc7BGZ8X+XB2u/5Hb2HNz5/K53YZNvfrs=
-github.com/mattermost/mattermost/server/v8 v8.0.0-20251014075701-833e0125320d/go.mod h1:HILhsra+xY4SNEFhuPbobH3I8a0aeXJcTJ6RWPX85nI=
 github.com/mattermost/xml-roundtrip-validator v0.1.0 h1:RXbVD2UAl7A7nOTR4u7E3ILa4IbtvKBHw64LDsmu9hU=
 github.com/mattermost/xml-roundtrip-validator v0.1.0/go.mod h1:qccnGMcpgwcNaBnxqpJpWWUiPNr5H3O8eDgGV9gT5To=
 github.com/mattn/go-colorable v0.1.9/go.mod h1:u6P/XSegPjTcexA+o6vUJrdnUu04hMope9wVRipJSqc=
@@ -166,8 +164,8 @@ github.com/prometheus/procfs v0.0.0-20180725123919-05ee40e3a273/go.mod h1:c3At6R
 github.com/rogpeppe/go-internal v1.6.1/go.mod h1:xXDCJY+GAPziupqXw64V24skbSoqbTEfhy4qGm1nDQc=
 github.com/rogpeppe/go-internal v1.8.0/go.mod h1:WmiCO8CzOY8rg0OYDC4/i/2WRWAB6poM+XZ2dLUbcbE=
 github.com/rogpeppe/go-internal v1.9.0/go.mod h1:WtVeX8xhTBvf0smdhujwtBcq4Qrzq/fJaraNFVN+nFs=
-github.com/rogpeppe/go-internal v1.10.0 h1:TMyTOH3F/DB16zRVcYyreMH6GnZZrwQVAoYjRBZyWFQ=
-github.com/rogpeppe/go-internal v1.10.0/go.mod h1:UQnix2H7Ngw/k4C5ijL5+65zddjncjaFoBhdsK/akog=
+github.com/rogpeppe/go-internal v1.13.1 h1:KvO1DLK/DRN07sQ1LQKScxyZJuNnedQ5/wKSR38lUII=
+github.com/rogpeppe/go-internal v1.13.1/go.mod h1:uMEvuHeurkdAXX61udpOXGD/AzZDWNMNyH2VO9fmH0o=
 github.com/russellhaering/goxmldsig v1.2.0/go.mod h1:gM4MDENBQf7M+V824SGfyIUVFWydB7n0KkEubVJl+Tw=
 github.com/russellhaering/goxmldsig v1.5.0 h1:AU2UkkYIUOTyZRbe08XMThaOCelArgvNfYapcmSjBNw=
 github.com/russellhaering/goxmldsig v1.5.0/go.mod h1:x98CjQNFJcWfMxeOrMnMKg70lvDP6tE0nTaeUnjXDmk=

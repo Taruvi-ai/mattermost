@@ -43,6 +43,20 @@ type SqlXExecutor interface {
 	Select(dest any, query string, args ...any) error
 }
 
+// cleanupChannelStoreData purges all channel-related data written by TestChannelStore
+// sub-tests. The integrity tests (TestCheck*) do full-table scans and fail if any
+// orphaned rows remain. A blanket purge is safe: no FK constraints are enforced in the
+// schema, and every test suite creates its own data independently.
+func cleanupChannelStoreData(t *testing.T, s SqlStore) {
+	t.Helper()
+	db := s.GetMaster()
+	db.Exec(`DELETE FROM Threads`)
+	db.Exec(`DELETE FROM ChannelMemberHistory`)
+	db.Exec(`DELETE FROM ChannelMembers`)
+	db.Exec(`DELETE FROM Channels`)
+	db.Exec(`DELETE FROM TeamMembers`)
+}
+
 func cleanupChannels(t *testing.T, rctx request.CTX, ss store.Store) {
 	list, err := ss.Channel().GetAllChannels(0, 100000, store.ChannelSearchOpts{IncludeDeleted: true})
 	require.NoError(t, err, "error cleaning all channels", err)
@@ -68,6 +82,7 @@ func channelMemberToJSON(t *testing.T, cm *model.ChannelMember) string {
 
 func TestChannelStore(t *testing.T, rctx request.CTX, ss store.Store, s SqlStore) {
 	createDefaultRoles(ss)
+	t.Cleanup(func() { cleanupChannelStoreData(t, s) })
 
 	t.Run("Save", func(t *testing.T) { testChannelStoreSave(t, rctx, ss) })
 	t.Run("SaveDirectChannel", func(t *testing.T) { testChannelStoreSaveDirectChannel(t, rctx, ss, s) })
@@ -1019,9 +1034,7 @@ func testChannelStoreGetByNames(t *testing.T, rctx request.CTX, ss store.Store) 
 		for _, channel := range channels {
 			ids = append(ids, channel.Id)
 		}
-		sort.Strings(ids)
-		sort.Strings(tc.ExpectedIds)
-		assert.Equal(t, tc.ExpectedIds, ids, "tc %v", index)
+		assert.ElementsMatch(t, tc.ExpectedIds, ids, "tc %v", index)
 	}
 
 	err := ss.Channel().Delete(o1.Id, model.GetMillis())
@@ -1076,9 +1089,7 @@ func testChannelStoreGetByNamesIncludeDeleted(t *testing.T, rctx request.CTX, ss
 		for _, channel := range channels {
 			ids = append(ids, channel.Id)
 		}
-		sort.Strings(ids)
-		sort.Strings(tc.ExpectedIds)
-		assert.Equal(t, tc.ExpectedIds, ids, "tc %v", index)
+		assert.ElementsMatch(t, tc.ExpectedIds, ids, "tc %v", index)
 	}
 }
 
@@ -5994,21 +6005,6 @@ func testChannelStoreSearchMore(t *testing.T, rctx request.CTX, ss store.Store) 
 	})
 }
 
-type ByChannelDisplayName model.ChannelList
-
-func (s ByChannelDisplayName) Len() int { return len(s) }
-func (s ByChannelDisplayName) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
-func (s ByChannelDisplayName) Less(i, j int) bool {
-	if s[i].DisplayName != s[j].DisplayName {
-		return s[i].DisplayName < s[j].DisplayName
-	}
-
-	return s[i].Id < s[j].Id
-}
-
 func testChannelStoreSearchInTeam(t *testing.T, rctx request.CTX, ss store.Store) {
 	teamID := model.NewId()
 	otherTeamID := model.NewId()
@@ -6222,8 +6218,7 @@ func testChannelStoreSearchInTeam(t *testing.T, rctx request.CTX, ss store.Store
 		t.Run("AutoCompleteInTeam/"+testCase.Description, func(t *testing.T) {
 			channels, err := ss.Channel().AutocompleteInTeam(rctx, testCase.TeamID, testCase.UserID, testCase.Term, testCase.IncludeDeleted, false)
 			require.NoError(t, err)
-			sort.Sort(ByChannelDisplayName(channels))
-			require.Equal(t, testCase.ExpectedResults, channels)
+			require.ElementsMatch(t, testCase.ExpectedResults, channels)
 		})
 	}
 }
@@ -6420,6 +6415,24 @@ func testAutocomplete(t *testing.T, rctx request.CTX, ss store.Store, s SqlStore
 			require.ElementsMatch(t, testCase.ExpectedTeamNames, gotTeamNames, "team names are not as expected")
 		})
 	}
+
+	// MM-67049: Verify that users removed from a team cannot see channels from that
+	// team, regardless of includeDeleted. The includeDeleted parameter should only
+	// affect channel deletion status, not team membership.
+	t.Run("MM-67049: removed team member cannot see channels regardless of includeDeleted", func(t *testing.T) {
+		// Sanity check: o5 is in leftTeamID and matches search term
+		require.Equal(t, leftTeamID, o5.TeamId)
+		require.Contains(t, o5.DisplayName, "ChannelA")
+
+		// m1.UserId was removed from leftTeamID (tm5.DeleteAt was set above in the test setup)
+		for _, includeDeleted := range []bool{false, true} {
+			channels, err2 := ss.Channel().Autocomplete(rctx, m1.UserId, "ChannelA", includeDeleted, false)
+			require.NoError(t, err2)
+			for _, ch := range channels {
+				require.NotEqual(t, o5.Id, ch.Id, "includeDeleted=%v: channel from left team should not be returned", includeDeleted)
+			}
+		}
+	})
 
 	t.Run("Limit", func(t *testing.T) {
 		for i := range model.ChannelSearchDefaultLimit + 10 {

@@ -56,12 +56,22 @@ func (ms *mockSuite) UserCanSeeOtherUser(rctx request.CTX, userID string, otherU
 	return true, nil
 }
 
-func (ms *mockSuite) HasPermissionToReadChannel(rctx request.CTX, userID string, channel *model.Channel) bool {
-	return true
+func (ms *mockSuite) HasPermissionToReadChannel(rctx request.CTX, userID string, channel *model.Channel) (bool, bool) {
+	return true, true
 }
 
 func (ms *mockSuite) MFARequired(rctx request.CTX) *model.AppError {
 	return nil
+}
+
+func (ms *mockSuite) MakeAuditRecord(rctx request.CTX, event string, initialStatus string) *model.AuditRecord {
+	return &model.AuditRecord{
+		Status:    initialStatus,
+		EventName: event,
+	}
+}
+
+func (ms *mockSuite) LogAuditRec(rctx request.CTX, auditRec *model.AuditRecord, err error) {
 }
 
 func setupDBStore(tb testing.TB) (store.Store, *model.SqlSettings) {
@@ -186,15 +196,6 @@ func setupTestHelper(dbStore store.Store, dbSettings *model.SqlSettings, enterpr
 		*cfg.TeamSettings.EnableOpenServer = true
 	})
 
-	// Disable strict password requirements for test
-	th.Service.UpdateConfig(func(cfg *model.Config) {
-		*cfg.PasswordSettings.MinimumLength = 5
-		*cfg.PasswordSettings.Lowercase = false
-		*cfg.PasswordSettings.Uppercase = false
-		*cfg.PasswordSettings.Symbol = false
-		*cfg.PasswordSettings.Number = false
-	})
-
 	if enterprise {
 		th.Service.SetLicense(model.NewTestLicense())
 	} else {
@@ -251,7 +252,7 @@ func (th *TestHelper) CreateUserOrGuest(tb testing.TB, guest bool) *model.User {
 		Email:         "success+" + id + "@simulator.amazonses.com",
 		Username:      "un_" + id,
 		Nickname:      "nn_" + id,
-		Password:      "Password1",
+		Password:      model.NewTestPassword(),
 		EmailVerified: true,
 		Roles:         model.SystemUserRoleId,
 	}
@@ -269,7 +270,7 @@ func (th *TestHelper) CreateAdmin(tb testing.TB) *model.User {
 		Email:         "success+" + id + "@simulator.amazonses.com",
 		Username:      "un_" + id,
 		Nickname:      "nn_" + id,
-		Password:      "Password1",
+		Password:      model.NewTestPassword(),
 		EmailVerified: true,
 		Roles:         model.SystemAdminRoleId + " " + model.SystemUserRoleId,
 	}
