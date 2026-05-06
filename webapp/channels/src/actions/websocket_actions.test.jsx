@@ -1,9 +1,11 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
+import cloneDeep from 'lodash/cloneDeep';
+
 import {WebSocketEvents} from '@mattermost/client';
 
-import {CloudTypes} from 'mattermost-redux/action_types';
+import {ChannelTypes, CloudTypes} from 'mattermost-redux/action_types';
 import {fetchMyCategories} from 'mattermost-redux/actions/channel_categories';
 import {fetchAllMyTeamsChannels} from 'mattermost-redux/actions/channels';
 import {getCustomProfileAttributeFields} from 'mattermost-redux/actions/general';
@@ -23,6 +25,8 @@ import {closeRightHandSide} from 'actions/views/rhs';
 import realConfigureStore from 'store';
 import store from 'stores/redux_store';
 
+import {invalidateAccessControlAttributesCache} from 'components/common/hooks/useAccessControlAttributes';
+
 import mergeObjects from 'packages/mattermost-redux/test/merge_objects';
 import configureStore from 'tests/test_store';
 import {getHistory} from 'utils/browser_history';
@@ -30,6 +34,7 @@ import Constants, {ActionTypes, UserStatuses} from 'utils/constants';
 
 import {
     handleChannelUpdatedEvent,
+    handleChannelAccessControlUpdatedEvent,
     handleEvent,
     handleNewPostEvent,
     handleNewPostEvents,
@@ -112,6 +117,11 @@ jest.mock('actions/views/channel', () => ({
 jest.mock('plugins', () => ({
     ...jest.requireActual('plugins'),
     loadPluginsIfNecessary: jest.fn(() => Promise.resolve()),
+}));
+
+jest.mock('components/common/hooks/useAccessControlAttributes', () => ({
+    EntityType: {Channel: 'channel'},
+    invalidateAccessControlAttributesCache: jest.fn(),
 }));
 
 let mockState = {
@@ -705,14 +715,67 @@ describe('reconnect', () => {
     });
 
     test('should reload custom profile attribute fields on reconnect', () => {
+        const clonedMockState = cloneDeep(mockState);
+
+        mockState = mergeObjects(
+            mockState,
+            {
+                entities: {
+                    general: {
+                        license: {
+                            SkuShortName: 'enterprise',
+                        },
+                        config: {
+                            FeatureFlagCustomProfileAttributes: 'true',
+                        },
+                    },
+                },
+            },
+        );
+
         reconnect();
         expect(getCustomProfileAttributeFields).toHaveBeenCalled();
+
+        // Restore mock state
+        mockState = clonedMockState;
+    });
+
+    test.each([
+        {SkuShortName: 'starter', FeatureFlagCustomProfileAttributes: 'true'},
+        {SkuShortName: 'enterprise', FeatureFlagCustomProfileAttributes: 'false'},
+    ])("should not reload custom profile attribute fields on reconnect if feature isn't available", ({SkuShortName, FeatureFlagCustomProfileAttributes}) => {
+        const clonedMockState = cloneDeep(mockState);
+
+        mockState = mergeObjects(
+            mockState,
+            {
+                entities: {
+                    general: {
+                        license: {
+                            SkuShortName,
+                        },
+                        config: {
+                            FeatureFlagCustomProfileAttributes,
+                        },
+                    },
+                },
+            },
+        );
+
+        reconnect();
+        expect(getCustomProfileAttributeFields).not.toHaveBeenCalled();
+
+        // Restore mock state
+        mockState = clonedMockState;
     });
 });
 
 describe('handleChannelUpdatedEvent', () => {
     const initialState = {
         entities: {
+            general: {
+                config: {},
+            },
             channels: {
                 currentChannelId: 'channel',
                 channels: {
@@ -720,6 +783,7 @@ describe('handleChannelUpdatedEvent', () => {
                         id: 'channel',
                     },
                 },
+                myMembers: {},
             },
             teams: {
                 currentTeamId: 'team',
@@ -815,6 +879,47 @@ describe('handleChannelUpdatedEvent', () => {
         testStore.dispatch(handleChannelUpdatedEvent(msg));
 
         expect(getHistory().replace).not.toHaveBeenCalled();
+    });
+});
+
+describe('handleChannelAccessControlUpdatedEvent', () => {
+    beforeEach(() => {
+        invalidateAccessControlAttributesCache.mockClear();
+    });
+
+    test('dispatches RECEIVED_CHANNEL with parsed channel and invalidates attribute cache', () => {
+        const testStore = configureStore({});
+        const channel = {
+            id: 'channel-ac-1',
+            team_id: 'team-1',
+            policy_enforced: true,
+        };
+        const msg = {
+            data: {
+                channel: JSON.stringify(channel),
+            },
+        };
+
+        testStore.dispatch(handleChannelAccessControlUpdatedEvent(msg));
+
+        expect(testStore.getActions()).toEqual([
+            {
+                type: ChannelTypes.RECEIVED_CHANNEL,
+                data: channel,
+            },
+        ]);
+        expect(invalidateAccessControlAttributesCache).toHaveBeenCalledTimes(1);
+        expect(invalidateAccessControlAttributesCache).toHaveBeenCalledWith('channel', 'channel-ac-1');
+    });
+
+    test('returns early when msg.data.channel is missing', () => {
+        const testStore = configureStore({});
+        const msg = {data: {}};
+
+        testStore.dispatch(handleChannelAccessControlUpdatedEvent(msg));
+
+        expect(testStore.getActions()).toEqual([]);
+        expect(invalidateAccessControlAttributesCache).not.toHaveBeenCalled();
     });
 });
 
@@ -953,14 +1058,12 @@ describe('handleCloudSubscriptionChanged', () => {
 });
 
 describe('handlePluginEnabled/handlePluginDisabled', () => {
-    const origLog = console.log;
     const origError = console.error;
     const origCreateElement = document.createElement;
     const origGetElementsByTagName = document.getElementsByTagName;
     const origWindowPlugins = window.plugins;
 
     afterEach(() => {
-        console.log = origLog;
         console.error = origError;
         document.createElement = origCreateElement;
         document.getElementsByTagName = origGetElementsByTagName;
@@ -986,8 +1089,7 @@ describe('handlePluginEnabled/handlePluginDisabled', () => {
         };
 
         beforeEach(async () => {
-            console.log = jest.fn();
-            console.error = jest.fn();
+            console.error = jest.fn((...args) => origError(...args));
 
             document.createElement = jest.fn();
             document.getElementsByTagName = jest.fn();
@@ -996,59 +1098,35 @@ describe('handlePluginEnabled/handlePluginDisabled', () => {
             }]);
         });
 
-        test('when a plugin is enabled', () => {
+        test('when a plugin is enabled', async () => {
             const manifest = {
                 ...baseManifest,
                 id: 'com.mattermost.demo-plugin',
-            };
-            const initialize = jest.fn();
-            window.plugins = {
-                [manifest.id]: {
-                    initialize,
-                },
             };
 
             const mockScript = {};
             document.createElement.mockReturnValue(mockScript);
 
-            expect(mockScript.onload).toBeUndefined();
             handlePluginEnabled({data: {manifest}});
 
             expect(document.createElement).toHaveBeenCalledWith('script');
             expect(document.getElementsByTagName).toHaveBeenCalledTimes(1);
             expect(document.getElementsByTagName()[0].appendChild).toHaveBeenCalledTimes(1);
-            expect(mockScript.onload).toBeInstanceOf(Function);
 
-            // Pretend to be a browser, invoke onload
-            mockScript.onload();
-            expect(initialize).toHaveBeenCalledWith(expect.anything(), store);
-            const registery = initialize.mock.calls[0][0];
-            const mockComponent = 'mockRootComponent';
-            registery.registerRootComponent(mockComponent);
+            expect(store.dispatch).toHaveBeenCalledTimes(1);
 
             let dispatchArg = store.dispatch.mock.calls[0][0];
             expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
             expect(dispatchArg.data).toBe(manifest);
 
-            dispatchArg = store.dispatch.mock.calls[1][0];
-
-            expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_PLUGIN_COMPONENT);
-            expect(dispatchArg.name).toBe('Root');
-            expect(dispatchArg.data.component).toBe(mockComponent);
-            expect(dispatchArg.data.pluginId).toBe(manifest.id);
+            // Assert handlePluginEnabled is idempotent
+            handlePluginEnabled({data: {manifest}});
 
             expect(store.dispatch).toHaveBeenCalledTimes(2);
 
-            // Assert handlePluginEnabled is idempotent
-            mockScript.onload = undefined;
-            handlePluginEnabled({data: {manifest}});
-            expect(mockScript.onload).toBeUndefined();
-
-            dispatchArg = store.dispatch.mock.calls[2][0];
+            dispatchArg = store.dispatch.mock.calls[1][0];
             expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
             expect(dispatchArg.data).toBe(manifest);
-
-            expect(store.dispatch).toHaveBeenCalledTimes(3);
 
             expect(console.error).toHaveBeenCalledTimes(0);
         });
@@ -1057,12 +1135,6 @@ describe('handlePluginEnabled/handlePluginDisabled', () => {
             const manifest = {
                 ...baseManifest,
                 id: 'com.mattermost.demo-2-plugin',
-            };
-            const initialize = jest.fn();
-            window.plugins = {
-                [manifest.id]: {
-                    initialize,
-                },
             };
 
             const manifestv2 = {
@@ -1076,69 +1148,39 @@ describe('handlePluginEnabled/handlePluginDisabled', () => {
             const mockScript = {};
             document.createElement.mockReturnValue(mockScript);
 
-            expect(mockScript.onload).toBeUndefined();
             handlePluginEnabled({data: {manifest}});
 
             expect(document.createElement).toHaveBeenCalledWith('script');
             expect(document.getElementsByTagName).toHaveBeenCalledTimes(1);
             expect(document.getElementsByTagName()[0].appendChild).toHaveBeenCalledTimes(1);
-            expect(mockScript.onload).toBeInstanceOf(Function);
-
-            // Pretend to be a browser, invoke onload
-            mockScript.onload();
-            expect(initialize).toHaveBeenCalledWith(expect.anything(), store);
-            const registry = initialize.mock.calls[0][0];
-            const mockComponent = 'mockRootComponent';
-            registry.registerRootComponent(mockComponent);
 
             let dispatchArg = store.dispatch.mock.calls[0][0];
             expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
             expect(dispatchArg.data).toBe(manifest);
 
-            dispatchArg = store.dispatch.mock.calls[1][0];
-            expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_PLUGIN_COMPONENT);
-            expect(dispatchArg.name).toBe('Root');
-            expect(dispatchArg.data.component).toBe(mockComponent);
-            expect(dispatchArg.data.pluginId).toBe(manifest.id);
-
             // Upgrade plugin
-            mockScript.onload = undefined;
             handlePluginEnabled({data: {manifest: manifestv2}});
 
             // Assert upgrade is idempotent
             handlePluginEnabled({data: {manifest: manifestv2}});
 
-            expect(mockScript.onload).toBeInstanceOf(Function);
             expect(document.createElement).toHaveBeenCalledTimes(2);
 
-            mockScript.onload();
-            expect(initialize).toHaveBeenCalledWith(expect.anything(), store);
-            expect(initialize).toHaveBeenCalledTimes(2);
-            const registry2 = initialize.mock.calls[0][0];
-            const mockComponent2 = 'mockRootComponent2';
-            registry2.registerRootComponent(mockComponent2);
+            dispatchArg = store.dispatch.mock.calls[1][0];
+            expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
+            expect(dispatchArg.data).toBe(manifestv2);
 
-            dispatchArg = store.dispatch.mock.calls[2][0];
+            expect(store.dispatch).toHaveBeenCalledTimes(4);
+            const dispatchRemovedArg = store.dispatch.mock.calls[2][0];
+            expect(typeof dispatchRemovedArg).toBe('function');
+            dispatchRemovedArg(store.dispatch);
+
+            dispatchArg = store.dispatch.mock.calls[3][0];
             expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
             expect(dispatchArg.data).toBe(manifestv2);
 
             expect(store.dispatch).toHaveBeenCalledTimes(6);
-            const dispatchRemovedArg = store.dispatch.mock.calls[3][0];
-            expect(typeof dispatchRemovedArg).toBe('function');
-            dispatchRemovedArg(store.dispatch);
-
-            dispatchArg = store.dispatch.mock.calls[4][0];
-            expect(dispatchArg.type).toBe(ActionTypes.RECEIVED_WEBAPP_PLUGIN);
-            expect(dispatchArg.data).toBe(manifestv2);
-
-            const dispatchReceivedArg2 = store.dispatch.mock.calls[5][0];
-            expect(dispatchReceivedArg2.type).toBe(ActionTypes.RECEIVED_PLUGIN_COMPONENT);
-            expect(dispatchReceivedArg2.name).toBe('Root');
-            expect(dispatchReceivedArg2.data.component).toBe(mockComponent2);
-            expect(dispatchReceivedArg2.data.pluginId).toBe(manifest.id);
-
-            expect(store.dispatch).toHaveBeenCalledTimes(8);
-            const dispatchReceivedArg4 = store.dispatch.mock.calls[7][0];
+            const dispatchReceivedArg4 = store.dispatch.mock.calls[5][0];
 
             expect(dispatchReceivedArg4.type).toBe(ActionTypes.REMOVED_WEBAPP_PLUGIN);
             expect(dispatchReceivedArg4.data).toBe(manifestv2);
@@ -1166,7 +1208,6 @@ describe('handlePluginEnabled/handlePluginDisabled', () => {
         };
 
         beforeEach(async () => {
-            console.log = jest.fn();
             console.error = jest.fn();
 
             document.createElement = jest.fn();

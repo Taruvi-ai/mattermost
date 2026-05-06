@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -107,6 +108,16 @@ func (ps *PlatformService) GetLogsSkipSend(rctx request.CTX, page, perPage int, 
 	if *ps.Config().LogSettings.EnableFile {
 		ps.Log().Flush()
 		logFile := config.GetLogFileLocation(*ps.Config().LogSettings.FileLocation)
+
+		// Validate the file path to prevent arbitrary file reads
+		if err := ps.validateLogFilePath(logFile); err != nil {
+			rctx.Logger().Error("Blocked attempt to read log file outside allowed root",
+				mlog.String("path", logFile),
+				mlog.String("config_section", "LogSettings.FileLocation"),
+				mlog.Err(err))
+			return nil, model.NewAppError("getLogs", "api.admin.file_read_error", nil, "", http.StatusForbidden).Wrap(err)
+		}
+
 		file, err := os.Open(logFile)
 		if err != nil {
 			return nil, model.NewAppError("getLogs", "api.admin.file_read_error", nil, "", http.StatusInternalServerError).Wrap(err)
@@ -215,14 +226,25 @@ func (ps *PlatformService) GetLogFile(rctx request.CTX) (*model.FileData, error)
 	}, nil
 }
 
+// getLogRootPath returns the log root directory, checking the instance override
+// first, then delegating to config.GetLogRootPath (env var / default).
+func (ps *PlatformService) getLogRootPath() string {
+	if ps.logRootPathOverride != "" {
+		if abs, err := filepath.Abs(ps.logRootPathOverride); err == nil {
+			return abs
+		}
+		return ps.logRootPathOverride
+	}
+	return config.GetLogRootPath()
+}
+
 // validateLogFilePath validates that a log file path is within the logging root directory.
 // This prevents arbitrary file read/write vulnerabilities in logging configuration.
 // The logging root is determined by MM_LOG_PATH environment variable or the default logs directory.
-// Currently used to validate paths when reading logs via GetAdvancedLogs.
+// Used to validate paths when reading logs via GetLogsSkipSend, GetLogFile, and GetAdvancedLogs.
 // In future versions, this will also be used to validate paths when saving logging config.
 func (ps *PlatformService) validateLogFilePath(filePath string) error {
-	// Get the logging root path (from env var or default logs directory)
-	loggingRoot := config.GetLogRootPath()
+	loggingRoot := ps.getLogRootPath()
 
 	return config.ValidateLogFilePath(filePath, loggingRoot)
 }

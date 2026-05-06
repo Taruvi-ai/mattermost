@@ -1,12 +1,12 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import * as TIMEOUTS from '../../../fixtures/timeouts';
+import * as TIMEOUTS from '@/fixtures/timeouts';
 import {
     getJoinEmailTemplate,
     reUrl,
     verifyEmailBody,
-} from '../../../utils';
+} from '@/utils';
 
 export const allowOnlyUserFromSpecificDomain = (domain) => {
     // # Open 'Team Settings' modal
@@ -25,7 +25,7 @@ export const allowOnlyUserFromSpecificDomain = (domain) => {
         cy.findByText('Save').should('be.visible').click();
 
         // # Close the modal
-        cy.get('#teamSettingsModalLabel').find('button').should('be.visible').click();
+        cy.get('button[aria-label="Close"]').should('be.visible').click();
     });
 };
 

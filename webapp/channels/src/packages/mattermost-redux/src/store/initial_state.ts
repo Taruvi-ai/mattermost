@@ -153,6 +153,7 @@ const state: GlobalState = {
             files: {},
             filesFromSearch: {},
             fileIdsByPostId: {},
+            rejectedFiles: new Set(),
         },
         emojis: {
             customEmoji: {},
@@ -186,6 +187,7 @@ const state: GlobalState = {
         channelCategories: {
             byId: {},
             orderByTeam: {},
+            managedCategoryMappings: {},
         },
         apps: {
             main: {
@@ -233,6 +235,11 @@ const state: GlobalState = {
             byChannelOrThreadId: {},
         },
         contentFlagging: {},
+        properties: {
+            fields: {byObjectType: {}, byId: {}},
+            values: {byTargetId: {}, byFieldId: {}},
+            groups: {byId: {}, byName: {}},
+        },
     },
     errors: [],
     requests: {

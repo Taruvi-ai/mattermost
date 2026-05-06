@@ -12,6 +12,13 @@ const (
 	AuditEventUnassignAccessPolicy      = "unassignAccessPolicy"      // remove access control policy from channels
 	AuditEventUpdateActiveStatus        = "updateActiveStatus"        // update active/inactive status of access control policy
 	AuditEventSetActiveStatus           = "setActiveStatus"           // set active/inactive status of multiple access control policies
+
+	AuditEventCreateTeamAccessPolicy   = "createTeamAccessPolicy"   // create team-scoped access control policy
+	AuditEventUpdateTeamAccessPolicy   = "updateTeamAccessPolicy"   // update team-scoped access control policy
+	AuditEventDeleteTeamAccessPolicy   = "deleteTeamAccessPolicy"   // delete team-scoped access control policy
+	AuditEventAssignTeamAccessPolicy   = "assignTeamAccessPolicy"   // assign channels to team-scoped access control policy
+	AuditEventUnassignTeamAccessPolicy = "unassignTeamAccessPolicy" // remove channels from team-scoped access control policy
+	AuditEventTriggerTeamPolicySync    = "triggerTeamPolicySync"    // trigger sync for team-scoped access control policies
 )
 
 // Audit & Certificates
@@ -47,6 +54,17 @@ const (
 	AuditEventListChannelBookmarksForChannel = "listChannelBookmarksForChannel" // list bookmarks for channel
 )
 
+// Views
+const (
+	AuditEventCreateView          = "createView"          // create view in channel
+	AuditEventGetView             = "getView"             // get view by ID
+	AuditEventUpdateView          = "updateView"          // update view
+	AuditEventDeleteView          = "deleteView"          // delete view
+	AuditEventListViewsForChannel = "listViewsForChannel" // list views for channel
+	AuditEventUpdateViewSortOrder = "updateViewSortOrder" // update view sort order
+	AuditEventGetPostsForView     = "getPostsForView"     // get posts for view
+)
+
 // Channel Categories
 const (
 	AuditEventCreateCategoryForTeamForUser      = "createCategoryForTeamForUser"      // create channel category for user
@@ -58,32 +76,34 @@ const (
 
 // Channels
 const (
-	AuditEventAddChannelMember               = "addChannelMember"               // add member to channel
-	AuditEventConvertGroupMessageToChannel   = "convertGroupMessageToChannel"   // convert group message to private channel
-	AuditEventCreateChannel                  = "createChannel"                  // create public or private channel
-	AuditEventCreateDirectChannel            = "createDirectChannel"            // create direct message channel between two users
-	AuditEventCreateGroupChannel             = "createGroupChannel"             // create group message channel with multiple users
-	AuditEventDeleteChannel                  = "deleteChannel"                  // delete channel
-	AuditEventGetPinnedPosts                 = "getPinnedPosts"                 // get pinned posts
-	AuditEventLocalAddChannelMember          = "localAddChannelMember"          // add channel member locally
-	AuditEventLocalCreateChannel             = "localCreateChannel"             // create channel locally
-	AuditEventLocalDeleteChannel             = "localDeleteChannel"             // delete channel locally
-	AuditEventLocalMoveChannel               = "localMoveChannel"               // move channel locally
-	AuditEventLocalPatchChannel              = "localPatchChannel"              // patch channel locally
-	AuditEventLocalRemoveChannelMember       = "localRemoveChannelMember"       // remove channel member locally
-	AuditEventLocalRestoreChannel            = "localRestoreChannel"            // restore channel locally
-	AuditEventLocalUpdateChannelPrivacy      = "localUpdateChannelPrivacy"      // update channel privacy locally
-	AuditEventMoveChannel                    = "moveChannel"                    // move channel to different team
-	AuditEventPatchChannel                   = "patchChannel"                   // update channel properties
-	AuditEventPatchChannelModerations        = "patchChannelModerations"        // update channel moderation settings
-	AuditEventRemoveChannelMember            = "removeChannelMember"            // remove member from channel
-	AuditEventRestoreChannel                 = "restoreChannel"                 // restore previously deleted channel
-	AuditEventUpdateChannel                  = "updateChannel"                  // update channel properties
-	AuditEventUpdateChannelMemberNotifyProps = "updateChannelMemberNotifyProps" // update notification preferences
-	AuditEventUpdateChannelMemberRoles       = "updateChannelMemberRoles"       // update roles and permissions
-	AuditEventUpdateChannelMemberSchemeRoles = "updateChannelMemberSchemeRoles" // update scheme-based roles
-	AuditEventUpdateChannelPrivacy           = "updateChannelPrivacy"           // change channel privacy settings
-	AuditEventUpdateChannelScheme            = "updateChannelScheme"            // update permission scheme applied to channel
+	AuditEventAddChannelMember                   = "addChannelMember"                   // add member to channel
+	AuditEventConvertGroupMessageToChannel       = "convertGroupMessageToChannel"       // convert group message to private channel
+	AuditEventCreateChannel                      = "createChannel"                      // create public or private channel
+	AuditEventCreateDirectChannel                = "createDirectChannel"                // create direct message channel between two users
+	AuditEventCreateGroupChannel                 = "createGroupChannel"                 // create group message channel with multiple users
+	AuditEventDeleteChannel                      = "deleteChannel"                      // delete channel
+	AuditEventGetPinnedPosts                     = "getPinnedPosts"                     // get pinned posts
+	AuditEventLocalAddChannelMember              = "localAddChannelMember"              // add channel member locally
+	AuditEventLocalCreateChannel                 = "localCreateChannel"                 // create channel locally
+	AuditEventLocalDeleteChannel                 = "localDeleteChannel"                 // delete channel locally
+	AuditEventLocalMoveChannel                   = "localMoveChannel"                   // move channel locally
+	AuditEventLocalPatchChannel                  = "localPatchChannel"                  // patch channel locally
+	AuditEventLocalRemoveChannelMember           = "localRemoveChannelMember"           // remove channel member locally
+	AuditEventLocalRestoreChannel                = "localRestoreChannel"                // restore channel locally
+	AuditEventLocalUpdateChannelPrivacy          = "localUpdateChannelPrivacy"          // update channel privacy locally
+	AuditEventMoveChannel                        = "moveChannel"                        // move channel to different team
+	AuditEventPatchChannel                       = "patchChannel"                       // update channel properties
+	AuditEventPatchChannelModerations            = "patchChannelModerations"            // update channel moderation settings
+	AuditEventRemoveChannelMember                = "removeChannelMember"                // remove member from channel
+	AuditEventRestoreChannel                     = "restoreChannel"                     // restore previously deleted channel
+	AuditEventSetChannelMembers                  = "setChannelMembers"                  // bulk set (replace) channel memberships
+	AuditEventUpdateChannel                      = "updateChannel"                      // update channel properties
+	AuditEventUpdateChannelMemberNotifyProps     = "updateChannelMemberNotifyProps"     // update notification preferences
+	AuditEventUpdateChannelMemberAutotranslation = "updateChannelMemberAutotranslation" // update autotranslation setting
+	AuditEventUpdateChannelMemberRoles           = "updateChannelMemberRoles"           // update roles and permissions
+	AuditEventUpdateChannelMemberSchemeRoles     = "updateChannelMemberSchemeRoles"     // update scheme-based roles
+	AuditEventUpdateChannelPrivacy               = "updateChannelPrivacy"               // change channel privacy settings
+	AuditEventUpdateChannelScheme                = "updateChannelScheme"                // update permission scheme applied to channel
 )
 
 // Commands
@@ -124,6 +144,20 @@ const (
 	AuditEventDeleteCPAField = "deleteCPAField" // delete custom profile attribute
 	AuditEventPatchCPAField  = "patchCPAField"  // update custom profile attribute field
 	AuditEventPatchCPAValues = "patchCPAValues" // update custom profile attribute values
+)
+
+// Property Fields
+const (
+	AuditEventCreatePropertyField = "createPropertyField" // create property field
+	AuditEventDeletePropertyField = "deletePropertyField" // delete property field
+	AuditEventGetPropertyFields   = "getPropertyFields"   // list property fields
+	AuditEventPatchPropertyField  = "patchPropertyField"  // update property field
+)
+
+// Property Values
+const (
+	AuditEventGetPropertyValues   = "getPropertyValues"   // get property values for target
+	AuditEventPatchPropertyValues = "patchPropertyValues" // update property values for target
 )
 
 // Data Retention Policies

@@ -33,7 +33,9 @@ export type PostType = 'system_add_remove' |
 'reminder' |
 'system_wrangler' |
 'custom_spillage_report' |
+'system_autotranslation' |
 'burn_on_read' |
+'system_shared_chan_state' |
 '';
 
 export type PostEmbedType = 'image' | 'link' | 'message_attachment' | 'opengraph' | 'permalink';
@@ -64,9 +66,9 @@ export type PostPriorityMetadata = {
 }
 
 export type PostTranslation = {
-    text: string;
-    type: string;
-    confidence?: number;
+    object?: {
+        message: string;
+    };
     state: 'ready' | 'skipped' | 'processing' | 'unavailable';
     source_lang?: string;
 };
@@ -82,6 +84,7 @@ export type PostMetadata = {
     translations?: Record<string, PostTranslation>;
     expire_at?: number;
     recipients?: string[];
+    redacted_file_count?: number;
 };
 
 export type Post = {
