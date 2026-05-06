@@ -31,11 +31,25 @@
 <script>
   var pending = null;
 
+  // Try auto-grant on load using parent's delegated activation (allow="storage-access")
+  if (document.requestStorageAccess) {
+    document.requestStorageAccess().catch(function() {});
+  }
+
   window.addEventListener("message", function(e) {
     var ok = e.origin.endsWith(".taruvi.space") || e.origin.endsWith(".taruvi.app");
     if (!ok || !e.data || e.data.type !== "mm-login") return;
     pending = e.data;
-    document.getElementById("btn").style.display = "block";
+
+    if (document.requestStorageAccess) {
+      document.requestStorageAccess()
+        .then(doLogin)
+        .catch(function() {
+          document.getElementById("btn").style.display = "block";
+        });
+    } else {
+      doLogin();
+    }
   });
 
   function doLogin() {
@@ -63,6 +77,7 @@
   }
 
   function connect() {
+    document.getElementById("btn").style.display = "none";
     if (document.requestStorageAccess) {
       document.requestStorageAccess().then(doLogin).catch(doLogin);
     } else {
