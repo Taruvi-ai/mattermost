@@ -267,6 +267,8 @@ func (a *App) CreateUserAsAdmin(rctx request.CTX, user *model.User, redirect str
 }
 
 func (a *App) CreateUserFromSignup(rctx request.CTX, user *model.User, redirect string) (*model.User, *model.AppError) {
+	return nil, model.NewAppError("CreateUserFromSignup", "api.user.create_user.signup_disabled.app_error", nil, "Self-service signup is disabled. Please contact Taruvi Administrator to create an account.", http.StatusForbidden)
+
 	if err := a.IsUserSignUpAllowed(); err != nil {
 		return nil, err
 	}
