@@ -4675,6 +4675,14 @@
     "translation": "Unable to parse the reset password token"
   },
   {
+    "id": "api.user.reset_password.disabled.app_error",
+    "translation": "Password reset is disabled. Please reset your password from Taruvi."
+  },
+  {
+    "id": "api.user.send_password_reset.disabled.app_error",
+    "translation": "Password reset is disabled. Please reset your password from Taruvi."
+  },
+  {
     "id": "api.user.reset_password_failed_attempts.ldap_and_email_only.app_error",
     "translation": "User auth service must be LDAP or Email."
   },
