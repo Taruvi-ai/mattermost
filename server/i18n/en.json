@@ -4375,6 +4375,10 @@
     "translation": "User creation is disabled."
   },
   {
+    "id": "api.user.create_user.signup_disabled.app_error",
+    "translation": "Self-service signup is disabled. Please contact Taruvi Administrator to create an account."
+  },
+  {
     "id": "api.user.create_user.guest_accounts.disabled.app_error",
     "translation": "Guest accounts are disabled."
   },
