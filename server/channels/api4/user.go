@@ -1911,7 +1911,9 @@ func updatePassword(c *Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func resetPassword(c *Context, w http.ResponseWriter, r *http.Request) {
-	c.Err = model.NewAppError("resetPassword", "api.user.reset_password.disabled.app_error", nil, "Password reset is disabled. Please reset your password from Taruvi.", http.StatusForbidden)
+	c.Err = model.NewAppError("resetPassword", "api.user.reset_password.disabled.app_error", nil, "", http.StatusForbidden)
+	c.Err.Message = "Password reset is disabled. Please reset your password from Taruvi."
+	c.Err.SkipTranslation = true
 	return
 
 	props := model.MapFromJSON(r.Body)
@@ -1941,7 +1943,9 @@ func resetPassword(c *Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func sendPasswordReset(c *Context, w http.ResponseWriter, r *http.Request) {
-	c.Err = model.NewAppError("sendPasswordReset", "api.user.send_password_reset.disabled.app_error", nil, "Password reset is disabled. Please reset your password from Taruvi.", http.StatusForbidden)
+	c.Err = model.NewAppError("sendPasswordReset", "api.user.send_password_reset.disabled.app_error", nil, "", http.StatusForbidden)
+	c.Err.Message = "Password reset is disabled. Please reset your password from Taruvi."
+	c.Err.SkipTranslation = true
 	return
 
 	props := model.MapFromJSON(r.Body)
