@@ -20,14 +20,10 @@ services:
     user: "2000:2000"
     ports:
       - "${MATTERMOST_PORT:-8065}:8065"
-    env_file:
-      - .env
     environment:
-      - MM_SQLSETTINGS_DATASOURCE=${MM_SQLSETTINGS_DATASOURCE:-postgres://mmuser:mostest@postgres:5432/mattermost?sslmode=disable}
-      - MM_SERVICESETTINGS_SITEURL=${MM_SERVICESETTINGS_SITEURL:-http://localhost:8065}
       - MM_SERVICESETTINGS_LISTENADDRESS=0.0.0.0:8065
-      - MM_LOGSETTINGS_CONSOLELEVEL=${MM_LOGSETTINGS_CONSOLELEVEL:-INFO}
     volumes:
+      - ./server/config/config.json:/mattermost/config/config.json:Z
       - mm_data:/mattermost/data:Z
       - mm_logs:/mattermost/logs:Z
     networks:

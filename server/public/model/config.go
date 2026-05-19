@@ -143,6 +143,13 @@ const (
 	ExportSettingsDefaultDirectory     = "./export"
 	ExportSettingsDefaultRetentionDays = 30
 
+	TaruviSettingsDefaultServerURL          = "http://localhost:8000"
+	TaruviSettingsDefaultAuthEndpoint       = "/api/_allauth/browser/v1/auth/login"
+	TaruviSettingsDefaultUserEndpoint       = "/api/users/me/"
+	TaruviSettingsDefaultVerifyEndpoint     = "/api/auth/jwt/token/verify/"
+	TaruviSettingsDefaultSessionEndpoint    = "/_allauth/app/v1/auth/session"
+	TaruviSettingsDefaultConnectionTimeout  = 10
+
 	EmailSettingsDefaultFeedbackOrganization = ""
 
 	SupportSettingsDefaultTermsOfServiceLink = "https://mattermost.com/pl/terms-of-use/"
@@ -3069,7 +3076,6 @@ func (s *KeycloakSettings) SetDefaults() {
 }
 
 type TaruviSettings struct {
-	Enable            *bool   `access:"authentication_taruvi"`
 	TaruviServerURL   *string `access:"authentication_taruvi"`
 	AuthEndpoint      *string `access:"authentication_taruvi"`
 	UserEndpoint      *string `access:"authentication_taruvi"`
@@ -3081,41 +3087,23 @@ type TaruviSettings struct {
 }
 
 func (s *TaruviSettings) SetDefaults() {
-	if s.Enable == nil {
-		s.Enable = NewPointer(false)
-	}
 	if s.TaruviServerURL == nil {
-		s.TaruviServerURL = NewPointer(os.Getenv("MM_TARUVISETTINGS_TARUVISERVERURL"))
-		if *s.TaruviServerURL == "" {
-			s.TaruviServerURL = NewPointer("http://localhost:8000")
-		}
+		s.TaruviServerURL = NewPointer(TaruviSettingsDefaultServerURL)
 	}
 	if s.AuthEndpoint == nil {
-		s.AuthEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_AUTHENDPOINT"))
-		if *s.AuthEndpoint == "" {
-			s.AuthEndpoint = NewPointer("/api/_allauth/browser/v1/auth/login")
-		}
+		s.AuthEndpoint = NewPointer(TaruviSettingsDefaultAuthEndpoint)
 	}
 	if s.UserEndpoint == nil {
-		s.UserEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_USERENDPOINT"))
-		if *s.UserEndpoint == "" {
-			s.UserEndpoint = NewPointer("/api/users/me/")
-		}
+		s.UserEndpoint = NewPointer(TaruviSettingsDefaultUserEndpoint)
 	}
 	if s.VerifyEndpoint == nil {
-		s.VerifyEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_VERIFYENDPOINT"))
-		if *s.VerifyEndpoint == "" {
-			s.VerifyEndpoint = NewPointer("/api/auth/jwt/token/verify/")
-		}
+		s.VerifyEndpoint = NewPointer(TaruviSettingsDefaultVerifyEndpoint)
 	}
 	if s.SessionEndpoint == nil {
-		s.SessionEndpoint = NewPointer(os.Getenv("MM_TARUVISETTINGS_SESSIONENDPOINT"))
-		if *s.SessionEndpoint == "" {
-			s.SessionEndpoint = NewPointer("/_allauth/app/v1/auth/session")
-		}
+		s.SessionEndpoint = NewPointer(TaruviSettingsDefaultSessionEndpoint)
 	}
 	if s.ConnectionTimeout == nil {
-		s.ConnectionTimeout = NewPointer(10)
+		s.ConnectionTimeout = NewPointer(TaruviSettingsDefaultConnectionTimeout)
 	}
 	if s.OverrideHost == nil {
 		s.OverrideHost = NewPointer(false)
