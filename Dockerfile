@@ -19,7 +19,8 @@ RUN make setup-go-work && make build-cmd-linux
 FROM ubuntu:noble-20251013@sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f176fb458d472dfc9e54 AS release
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG MM_PACKAGE="https://latest.mattermost.com/mattermost-enterprise-linux"
+# Must match the server version built from this repo (server/public/model/version.go)
+ARG MM_PACKAGE="https://releases.mattermost.com/11.6.1/mattermost-enterprise-11.6.1-linux-amd64.tar.gz"
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \

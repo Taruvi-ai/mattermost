@@ -3,8 +3,8 @@ name: Build and Push to Harbor Taruvi
 on:
   push:
     branches:
-      - mattermost-taruvi
-      - mattermost-taruviprod
+      - dev
+      - main
   workflow_dispatch:
     inputs:
       environment:
@@ -55,7 +55,7 @@ jobs:
   deploy-staging:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/mattermost-taruvi') || github.event.inputs.environment == 'staging'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event.inputs.environment == 'staging'
     steps:
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
@@ -91,7 +91,7 @@ jobs:
   deploy-production:
     runs-on: ubuntu-latest
     needs: build-and-push
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/mattermost-taruviprod') || github.event.inputs.environment == 'production'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.inputs.environment == 'production'
     environment: production
     steps:
       - name: Get environment variables from Infisical
@@ -119,7 +119,8 @@ jobs:
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
       
-      - name: Restart Mattermost deployment
+      - name: Deploy Mattermost production
         run: |
-          kubectl rollout restart deployment mattermost-production -n mattermost
+          kubectl patch mattermost mattermost-production -n mattermost --type='json' \
+            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
           kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost
