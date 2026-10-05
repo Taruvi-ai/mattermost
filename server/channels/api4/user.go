@@ -1920,6 +1920,11 @@ func updatePassword(c *Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func resetPassword(c *Context, w http.ResponseWriter, r *http.Request) {
+	c.Err = model.NewAppError("resetPassword", "api.user.reset_password.disabled.app_error", nil, "", http.StatusForbidden)
+	c.Err.Message = "Password reset is disabled. Please reset your password from Taruvi."
+	c.Err.SkipTranslation = true
+	return
+
 	props := model.MapFromJSON(r.Body)
 
 	token := props["token"]
@@ -1948,6 +1953,11 @@ func resetPassword(c *Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func sendPasswordReset(c *Context, w http.ResponseWriter, r *http.Request) {
+	c.Err = model.NewAppError("sendPasswordReset", "api.user.send_password_reset.disabled.app_error", nil, "", http.StatusForbidden)
+	c.Err.Message = "Password reset is disabled. Please reset your password from Taruvi."
+	c.Err.SkipTranslation = true
+	return
+
 	props := model.MapFromJSON(r.Body)
 
 	email := props["email"]
@@ -2047,6 +2057,7 @@ func login(c *Context, w http.ResponseWriter, r *http.Request) {
 	deviceId := props["device_id"]
 	ldapOnly := props["ldap_only"] == "true"
 	magicLinkToken := props["magic_link_token"]
+	authType := props["auth_type"]
 
 	auditRec := c.MakeAuditRecord(model.AuditEventLogin, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
@@ -2080,7 +2091,7 @@ func login(c *Context, w http.ResponseWriter, r *http.Request) {
 		model.AddEventParameterToAuditRec(auditRec, "login_id", loginId)
 		c.LogAuditWithUserId(id, "attempt - login_id="+loginId)
 
-		user, err = c.App.AuthenticateUserForLogin(c.AppContext, id, loginId, password, mfaToken, "", ldapOnly)
+		user, err = c.App.AuthenticateUserForLogin(c.AppContext, id, loginId, password, mfaToken, "", authType, ldapOnly)
 		if err != nil {
 			c.LogAuditWithUserId(id, "failure - login_id="+loginId)
 			c.Err = err
@@ -2230,7 +2241,7 @@ func loginCWS(c *Context, w http.ResponseWriter, r *http.Request) {
 	auditRec := c.MakeAuditRecord(model.AuditEventLogin, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
 	model.AddEventParameterToAuditRec(auditRec, "login_id", loginID)
-	user, err := c.App.AuthenticateUserForLogin(c.AppContext, "", loginID, "", "", token, false)
+	user, err := c.App.AuthenticateUserForLogin(c.AppContext, "", loginID, "", "", token, "", false)
 	if err != nil {
 		c.LogAuditWithUserId("", "failure - login_id="+loginID)
 		c.LogErrorByCode(err)
@@ -2613,7 +2624,7 @@ func attachDeviceId(c *Context, w http.ResponseWriter, r *http.Request, deviceId
 		Secure:   secure,
 	}
 
-	if secure && utils.CheckEmbeddedCookie(r) {
+	if secure {
 		sessionCookie.SameSite = http.SameSiteNoneMode
 	}
 

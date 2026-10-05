@@ -29,7 +29,7 @@ func TestCWSLogin(t *testing.T) {
 
 		th.App.Srv().SetCWSTokenOverride(token.Token)
 		t.Cleanup(func() { th.App.Srv().SetCWSTokenOverride("") })
-		user, appErr := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, false)
+		user, appErr := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, "", false)
 		require.Nil(t, appErr)
 		require.NotNil(t, user)
 		require.Equal(t, th.BasicUser.Username, user.Username)
@@ -49,7 +49,7 @@ func TestCWSLogin(t *testing.T) {
 			require.Nil(t, appErr)
 		}()
 
-		user, err := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, false)
+		user, err := th.App.AuthenticateUserForLogin(th.Context, "", th.BasicUser.Username, "", "", token.Token, "", false)
 		require.NotNil(t, err)
 		require.Nil(t, user)
 	})

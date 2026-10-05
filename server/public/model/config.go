@@ -143,6 +143,13 @@ const (
 	ExportSettingsDefaultDirectory     = "./export"
 	ExportSettingsDefaultRetentionDays = 30
 
+	TaruviSettingsDefaultServerURL          = "http://localhost:8000"
+	TaruviSettingsDefaultAuthEndpoint       = "/api/_allauth/browser/v1/auth/login"
+	TaruviSettingsDefaultUserEndpoint       = "/api/users/me/"
+	TaruviSettingsDefaultVerifyEndpoint     = "/api/auth/jwt/token/verify/"
+	TaruviSettingsDefaultSessionEndpoint    = "/_allauth/app/v1/auth/session"
+	TaruviSettingsDefaultConnectionTimeout  = 10
+
 	EmailSettingsDefaultFeedbackOrganization = ""
 
 	SupportSettingsDefaultTermsOfServiceLink = "https://mattermost.com/pl/terms-of-use/"
@@ -3053,6 +3060,74 @@ func (s *SamlSettings) SetDefaults() {
 	}
 }
 
+type KeycloakSettings struct {
+	Enable            *bool   `access:"authentication_keycloak"`
+	ServerURL         *string `access:"authentication_keycloak"`
+	Realm             *string `access:"authentication_keycloak"`
+	ClientID          *string `access:"authentication_keycloak"`
+	ClientSecret      *string `access:"authentication_keycloak"`
+	ConnectionTimeout *int    `access:"authentication_keycloak"`
+}
+
+func (s *KeycloakSettings) SetDefaults() {
+	if s.Enable == nil {
+		s.Enable = NewPointer(false)
+	}
+	if s.ServerURL == nil {
+		s.ServerURL = NewPointer("")
+	}
+	if s.Realm == nil {
+		s.Realm = NewPointer("")
+	}
+	if s.ClientID == nil {
+		s.ClientID = NewPointer("")
+	}
+	if s.ClientSecret == nil {
+		s.ClientSecret = NewPointer("")
+	}
+	if s.ConnectionTimeout == nil {
+		s.ConnectionTimeout = NewPointer(10)
+	}
+}
+
+type TaruviSettings struct {
+	TaruviServerURL   *string `access:"authentication_taruvi"`
+	AuthEndpoint      *string `access:"authentication_taruvi"`
+	UserEndpoint      *string `access:"authentication_taruvi"`
+	VerifyEndpoint    *string `access:"authentication_taruvi"`
+	SessionEndpoint   *string `access:"authentication_taruvi"`
+	ConnectionTimeout *int    `access:"authentication_taruvi"`
+	OverrideHost      *bool   `access:"authentication_taruvi"`
+	HostOverrideValue *string `access:"authentication_taruvi"`
+}
+
+func (s *TaruviSettings) SetDefaults() {
+	if s.TaruviServerURL == nil {
+		s.TaruviServerURL = NewPointer(TaruviSettingsDefaultServerURL)
+	}
+	if s.AuthEndpoint == nil {
+		s.AuthEndpoint = NewPointer(TaruviSettingsDefaultAuthEndpoint)
+	}
+	if s.UserEndpoint == nil {
+		s.UserEndpoint = NewPointer(TaruviSettingsDefaultUserEndpoint)
+	}
+	if s.VerifyEndpoint == nil {
+		s.VerifyEndpoint = NewPointer(TaruviSettingsDefaultVerifyEndpoint)
+	}
+	if s.SessionEndpoint == nil {
+		s.SessionEndpoint = NewPointer(TaruviSettingsDefaultSessionEndpoint)
+	}
+	if s.ConnectionTimeout == nil {
+		s.ConnectionTimeout = NewPointer(TaruviSettingsDefaultConnectionTimeout)
+	}
+	if s.OverrideHost == nil {
+		s.OverrideHost = NewPointer(false)
+	}
+	if s.HostOverrideValue == nil {
+		s.HostOverrideValue = NewPointer("")
+	}
+}
+
 type NativeAppSettings struct {
 	AppCustomURLSchemes           []string `access:"site_customization,write_restrictable,cloud_restrictable"` // telemetry: none
 	AppDownloadLink               *string  `access:"site_customization,write_restrictable,cloud_restrictable"`
@@ -3998,6 +4073,8 @@ type Config struct {
 	ComplianceSettings          ComplianceSettings
 	LocalizationSettings        LocalizationSettings
 	SamlSettings                SamlSettings
+	KeycloakSettings              KeycloakSettings
+	TaruviSettings                TaruviSettings
 	NativeAppSettings           NativeAppSettings
 	IntuneSettings              IntuneSettings
 	CacheSettings               CacheSettings
@@ -4085,6 +4162,8 @@ func (o *Config) SetDefaults() {
 
 	o.LdapSettings.SetDefaults()
 	o.SamlSettings.SetDefaults()
+	o.KeycloakSettings.SetDefaults()
+	o.TaruviSettings.SetDefaults()
 
 	if o.TeamSettings.TeammateNameDisplay == nil {
 		o.TeamSettings.TeammateNameDisplay = NewPointer(ShowUsername)
