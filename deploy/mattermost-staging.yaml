@@ -1,0 +1,216 @@
+# spec.version is overwritten with the commit SHA on every deploy by
+# .github/workflows/harbor-push.yml. Set it to the currently deployed SHA
+# before applying this file, or the apply will roll the server back.
+apiVersion: installation.mattermost.com/v1beta1
+kind: Mattermost
+metadata:
+  name: mattermost-staging
+  namespace: mattermost
+spec:
+  image: repo.eoxvantage.com/taruvi/mattermost
+  version: ab6d09ec095ead2b190076958705ddf9d828154b
+  replicas: 1
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets:
+  - name: registrypullsecret
+  ingress:
+    enabled: true
+    host: chatstag.taruvi.app
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      nginx.ingress.kubernetes.io/proxy-body-size: 100m
+      nginx.ingress.kubernetes.io/proxy-read-timeout: '600'
+      nginx.ingress.kubernetes.io/proxy-send-timeout: '600'
+  database:
+    external:
+      secret: mm-db-secret
+  fileStore:
+    external:
+      bucket: mattermost-chatstag
+      secret: mm-s3-secret
+      url: s3.amazonaws.com
+  scheduling:
+    resources:
+      requests:
+        cpu: 500m
+        memory: 500Mi
+      limits:
+        cpu: '4'
+        memory: 8Gi
+  mattermostEnv:
+  - name: MM_FILESETTINGS_AMAZONS3SSE
+    value: 'true'
+  - name: MM_FILESETTINGS_AMAZONS3REGION
+    value: us-east-2
+  - name: MM_FILESETTINGS_AMAZONS3ENDPOINT
+    value: s3.us-east-2.amazonaws.com
+  - name: MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER
+  - name: MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS
+  - name: MM_SQLSETTINGS_DATASOURCE
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SQLSETTINGS_DATASOURCE
+  - name: MM_SERVICESETTINGS_ALLOWCORSFROM
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_ALLOWCORSFROM
+  - name: MM_SERVICESETTINGS_COOKIESAMESITE
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_COOKIESAMESITE
+  - name: MM_SERVICESETTINGS_CORSALLOWCREDENTIALS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_CORSALLOWCREDENTIALS
+  - name: MM_SERVICESETTINGS_FRAMEANCESTORS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_FRAMEANCESTORS
+  - name: MM_TARUVISETTINGS_ENABLE
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_ENABLE
+  - name: MM_TARUVISETTINGS_OVERRIDEHOST
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_OVERRIDEHOST
+  - name: MM_TARUVISETTINGS_TARUVISERVERURL
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_TARUVISERVERURL
+  - name: MM_TARUVISETTINGS_USERENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_USERENDPOINT
+  - name: MM_TARUVISETTINGS_AUTHENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_AUTHENDPOINT
+  - name: MM_TARUVISETTINGS_CONNECTIONTIMEOUT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_CONNECTIONTIMEOUT
+  - name: MM_TARUVISETTINGS_SESSIONENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_SESSIONENDPOINT
+  - name: MM_TARUVISETTINGS_VERIFYENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TARUVISETTINGS_VERIFYENDPOINT
+  - name: MM_KEYCLOAKSETTINGS_ENABLE
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_ENABLE
+  - name: MM_KEYCLOAKSETTINGS_SERVERURL
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_SERVERURL
+  - name: MM_KEYCLOAKSETTINGS_REALM
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_REALM
+  - name: MM_KEYCLOAKSETTINGS_CLIENTID
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_CLIENTID
+  - name: MM_KEYCLOAKSETTINGS_CLIENTSECRET
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_CLIENTSECRET
+  - name: MM_KEYCLOAKSETTINGS_CONNECTIONTIMEOUT
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_KEYCLOAKSETTINGS_CONNECTIONTIMEOUT
+  - name: MM_SERVICESETTINGS_SITEURL
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_SITEURL
+  - name: MM_SERVICESETTINGS_COLLAPSEDTHREADS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_COLLAPSEDTHREADS
+  - name: MM_SERVICESETTINGS_ENABLEDEVELOPER
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_ENABLEDEVELOPER
+  - name: MM_SERVICESETTINGS_ENABLEINSECUREOUTGOINGCONNECTIONS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_ENABLEINSECUREOUTGOINGCONNECTIONS
+  - name: MM_SERVICESETTINGS_ENABLELOCALMODE
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_ENABLELOCALMODE
+  - name: MM_TEAMSETTINGS_SITENAME
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_SITENAME
+  - name: MM_TEAMSETTINGS_ENABLEOPENSERVER
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_ENABLEOPENSERVER
+  - name: MM_TEAMSETTINGS_ENABLEUSERCREATION
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_ENABLEUSERCREATION
+  - name: MM_TEAMSETTINGS_ENABLEUSERDEACTIVATION
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_ENABLEUSERDEACTIVATION
+  - name: MM_TEAMSETTINGS_MAXCHANNELSPERTEAM
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_MAXCHANNELSPERTEAM
+  - name: MM_TEAMSETTINGS_MAXNOTIFICATIONSPERCHANNEL
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_MAXNOTIFICATIONSPERCHANNEL
+  - name: MM_TEAMSETTINGS_MAXUSERSPERTEAM
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_MAXUSERSPERTEAM
+  - name: MM_TEAMSETTINGS_TEAMMATENAMEDISPLAY
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_TEAMSETTINGS_TEAMMATENAMEDISPLAY
