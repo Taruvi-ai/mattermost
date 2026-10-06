@@ -34,12 +34,22 @@ func scheduledPostChecks(where string, c *Context, scheduledPost *model.Schedule
 		return
 	}
 
+	if model.IsSystemMessagePostType(scheduledPost.Type) {
+		c.SetInvalidParam("post.type")
+		return
+	}
+
 	postHardenedModeCheckWithContext(where, c, scheduledPost.GetProps())
 	if c.Err != nil {
 		return
 	}
 
 	postPriorityCheckWithContext(where, c, scheduledPost.GetPriority(), scheduledPost.RootId)
+	if c.Err != nil {
+		return
+	}
+
+	postCardTypeCheckWithContext(where, c, scheduledPost.Type)
 	if c.Err != nil {
 		return
 	}

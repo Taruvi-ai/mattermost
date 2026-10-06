@@ -1474,10 +1474,6 @@
     "translation": "启动服务出错, err:%v"
   },
   {
-    "id": "api.slackimport.slack_add_bot_user.email_pwd",
-    "translation": "已导入整合/Slack 机器人用户 {{.Email}} 以及密码 {{.Password}}。\r\n"
-  },
-  {
     "id": "api.slackimport.slack_add_bot_user.unable_import",
     "translation": "无法导入整合/Slack 机器人用户 {{.Username}}。\r\n"
   },
@@ -1500,10 +1496,6 @@
   {
     "id": "api.slackimport.slack_add_users.created",
     "translation": "\r\n已创建用户：\r\n"
-  },
-  {
-    "id": "api.slackimport.slack_add_users.email_pwd",
-    "translation": "已导入拥有电子邮箱 {{.Email}} 以及密码 {{.Password}} 的 Slack 用户。\r\n"
   },
   {
     "id": "api.slackimport.slack_add_users.merge_existing",
@@ -4948,10 +4940,6 @@
   {
     "id": "api.templates.invite_guest_subject",
     "translation": "[{{ .SiteName }}] {{ .SenderName }} 邀请您以访客加入团队 {{ .TeamDisplayName }}"
-  },
-  {
-    "id": "api.templates.remove_expired_license.body.title",
-    "translation": "您的企业许可证已过期并且部分功能已停用。请立刻续订您的许可证。"
   },
   {
     "id": "api.user.create_password_token.error",
@@ -10020,10 +10008,6 @@
   {
     "id": "app.custom_profile_attributes.cpa_group_id.app_error",
     "translation": "无法注册自定义个人资料属性组"
-  },
-  {
-    "id": "app.custom_profile_attributes.create_property_field.app_error",
-    "translation": "无法创建自定义个人资料属性字段"
   },
   {
     "id": "app.custom_profile_attributes.get_property_field.app_error",

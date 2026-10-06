@@ -18,7 +18,6 @@ import (
 	"maps"
 	"slices"
 
-	agentclient "github.com/mattermost/mattermost-plugin-ai/public/bridgeclient"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/plugin"
 	"github.com/mattermost/mattermost/server/public/shared/i18n"
@@ -46,9 +45,8 @@ func (a *App) CreatePostAsUser(rctx request.CTX, post *model.Post, currentSessio
 		return nil, false, err
 	}
 
-	if strings.HasPrefix(post.Type, model.PostSystemMessagePrefix) {
-		err := model.NewAppError("CreatePostAsUser", "api.context.invalid_param.app_error", map[string]any{"Name": "post.type"}, "", http.StatusBadRequest)
-		return nil, false, err
+	if post.IsSystemMessage() {
+		return nil, false, model.NewAppError("CreatePostAsUser", "api.context.invalid_param.app_error", map[string]any{"Name": "post.type"}, "", http.StatusBadRequest)
 	}
 
 	if channel.DeleteAt != 0 {
@@ -504,6 +502,12 @@ func (a *App) attachFilesToPost(rctx request.CTX, post *model.Post, fileIDs mode
 	attachedIds := a.attachFileIDsToPost(rctx, post.Id, post.ChannelId, post.UserId, fileIDs)
 
 	if len(fileIDs) != len(attachedIds) {
+		// Remote-origin posts have a concurrent file-receive path that
+		// performs its own binding; stripping here can clobber a binding
+		// that path just made.
+		if post.GetRemoteID() != "" {
+			return fileIDs, nil
+		}
 		post.FileIds = attachedIds
 		if _, err := a.Srv().Store().Post().Overwrite(rctx, post); err != nil {
 			return nil, model.NewAppError("attachFilesToPost", "app.post.overwrite.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
@@ -570,9 +574,8 @@ func (a *App) FillInPostProps(rctx request.CTX, post *model.Post, channel *model
 		// This includes public channels and private channels where creator is a member
 		// Prevents information disclosure while supporting private channel mentions for members
 		for _, mentioned := range mentionedChannels {
-			// Check if post creator has permission to read this channel
-			// HasPermissionToReadChannel returns (hasPermission, isMember) for audit logging
-			if hasPermission, _ := a.HasPermissionToReadChannel(rctx, post.UserId, mentioned); hasPermission {
+			// Resolve the channel mention if the post creator may see the channel's name/link.
+			if a.HasPermissionToResolveChannelMention(rctx, post.UserId, mentioned) {
 				team, err := a.Srv().Store().Team().Get(mentioned.TeamId)
 				if err != nil {
 					rctx.Logger().Warn("Failed to get team of the channel mention", mlog.String("team_id", channel.TeamId), mlog.String("channel_id", channel.Id), mlog.Err(err))
@@ -1035,8 +1038,42 @@ func (a *App) publishWebsocketEventForPost(rctx request.CTX, post *model.Post, m
 		}
 	}
 
+	a.setupBroadcastHookForAbacFiles(post, message)
+
 	a.Publish(message)
 	return nil
+}
+
+// setupBroadcastHookForAbacFiles registers abacFilesBroadcastHook when ABAC is active and
+// the post has file attachments. Skipped for burn-on-read posts (handled by their own hook).
+func (a *App) setupBroadcastHookForAbacFiles(post *model.Post, message *model.WebSocketEvent) {
+	if a.Srv().Channels().AccessControl == nil {
+		return
+	}
+
+	cfg := a.Config().AccessControlSettings.EnableAttributeBasedAccessControl
+	if cfg == nil || !*cfg {
+		return
+	}
+
+	if !a.Config().FeatureFlags.PermissionPolicies {
+		return
+	}
+
+	if post.Type == model.PostTypeBurnOnRead {
+		return
+	}
+
+	// Prefer FileIds; fall back to Metadata.Files when PreparePostForClient has been called.
+	fileCount := len(post.FileIds)
+	if fileCount == 0 && post.Metadata != nil {
+		fileCount = len(post.Metadata.Files)
+	}
+	if fileCount == 0 {
+		return
+	}
+
+	useAbacFilesHook(message, post.ChannelId, fileCount)
 }
 
 func (a *App) setupBroadcastHookForPermalink(rctx request.CTX, post *model.Post, message *model.WebSocketEvent, permalinkPreviewedPost *model.PreviewPost, previewProp string) *model.AppError {
@@ -1208,6 +1245,35 @@ func (a *App) GetPostsPage(rctx request.CTX, options model.GetPostsOptions) (*mo
 	}
 
 	// The postList is sorted as only rootPosts Order is included
+	if appErr = a.filterInaccessiblePosts(postList, filterPostOptions{assumeSortedCreatedAt: true}); appErr != nil {
+		return nil, appErr
+	}
+
+	a.applyPostsWillBeConsumedHook(postList.Posts)
+
+	return postList, nil
+}
+
+// GetPostsForView returns posts for a specific view. Currently returns all channel posts.
+// TODO: In the future, this will filter posts based on the view's configuration (e.g., property values, sort order).
+func (a *App) GetPostsForView(rctx request.CTX, options model.GetPostsOptions) (*model.PostList, *model.AppError) {
+	postList, err := a.Srv().Store().Post().GetPosts(rctx, options, false, a.Config().GetSanitizeOptions())
+	if err != nil {
+		var invErr *store.ErrInvalidInput
+		switch {
+		case errors.As(err, &invErr):
+			return nil, model.NewAppError("GetPostsForView", "app.post.get_posts.app_error", nil, "", http.StatusBadRequest).Wrap(err)
+		default:
+			return nil, model.NewAppError("GetPostsForView", "app.post.get_posts_for_view.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
+		}
+	}
+
+	var appErr *model.AppError
+	postList, appErr = a.revealBurnOnReadPostsForUser(rctx, postList, options.UserId)
+	if appErr != nil {
+		return nil, appErr
+	}
+
 	if appErr = a.filterInaccessiblePosts(postList, filterPostOptions{assumeSortedCreatedAt: true}); appErr != nil {
 		return nil, appErr
 	}
@@ -3111,8 +3177,13 @@ func (a *App) CleanUpAfterPostDeletion(rctx request.CTX, post *model.Post, delet
 		return model.NewAppError("DeletePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
+	sanitizedPostJSON, jsonErr := post.ToJSON()
+	if jsonErr != nil {
+		return model.NewAppError("DeletePost", "api.marshal_error", nil, "", http.StatusInternalServerError).Wrap(jsonErr)
+	}
+
 	userMessage := model.NewWebSocketEvent(model.WebsocketEventPostDeleted, "", post.ChannelId, "", nil, "")
-	userMessage.Add("post", string(postJSON))
+	userMessage.Add("post", sanitizedPostJSON)
 	userMessage.GetBroadcast().ContainsSanitizedData = true
 	a.Publish(userMessage)
 
@@ -3223,19 +3294,23 @@ func (a *App) RewriteMessage(
 
 	systemPrompt := buildRewriteSystemPrompt(userLocale)
 
-	// Prepare completion request in the format expected by the client
-	client := a.GetBridgeClient(rctx.Session().UserId)
-	completionRequest := agentclient.CompletionRequest{
-		Posts: []agentclient.Post{
+	sessionUserID := ""
+	if session := rctx.Session(); session != nil {
+		sessionUserID = session.UserId
+	}
+
+	completionRequest := BridgeCompletionRequest{
+		Operation:       BridgeOperationRewrite,
+		ClientOperation: "message_rewrite",
+		Messages: []BridgeMessage{
 			{Role: "system", Message: systemPrompt},
 			{Role: "user", Message: userPrompt},
 		},
-		UserID:           rctx.Session().UserId,
-		Operation:        "message_rewrite",
 		OperationSubType: normalizeRewriteAction(action),
+		UserID:           sessionUserID,
 	}
 
-	completion, err := client.AgentCompletion(agentID, completionRequest)
+	completion, err := a.ch.agentsBridge.AgentCompletion(sessionUserID, agentID, completionRequest)
 	if err != nil {
 		return nil, model.NewAppError("RewriteMessage", "app.post.rewrite.agent_call_failed", nil, err.Error(), 500)
 	}
@@ -3487,6 +3562,19 @@ func (a *App) RevealPost(rctx request.CTX, post *model.Post, userID string, conn
 		IncludePriority: true,
 		RetainContent:   true,
 	})
+
+	// Apply ABAC file sanitization after PreparePostForClient populates Metadata.Files.
+	// Treat errors as non-fatal: a transient channel-lookup failure must not prevent
+	// the reveal WS event from reaching the author (the read receipt is already persisted).
+	if sanitized, _, sanitizeErr := a.SanitizePostMetadataForUser(rctx, revealedPost, userID); sanitizeErr == nil {
+		revealedPost = sanitized
+	} else {
+		rctx.Logger().Warn("Failed to sanitize post metadata for revealed BOR post; proceeding without sanitization",
+			mlog.String("post_id", revealedPost.Id),
+			mlog.String("user_id", userID),
+			mlog.Err(sanitizeErr),
+		)
+	}
 
 	// Publish websocket event if this is the first time revealing
 	if isFirstReveal {

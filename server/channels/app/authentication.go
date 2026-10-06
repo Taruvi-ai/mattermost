@@ -324,7 +324,7 @@ func (a *App) CheckUserMfa(rctx request.CTX, user *model.User, token string) *mo
 	return nil
 }
 
-func (a *App) MFARequired(rctx request.CTX) *model.AppError {
+func (a *App) MFARequired(rctx request.CTX, method string) *model.AppError {
 	if license := a.Channels().License(); license == nil || !*license.Features.MFA || !*a.Config().ServiceSettings.EnableMultifactorAuthentication || !*a.Config().ServiceSettings.EnforceMultifactorAuthentication {
 		return nil
 	}
@@ -355,9 +355,9 @@ func (a *App) MFARequired(rctx request.CTX) *model.AppError {
 		return nil
 	}
 
-	// Special case to let user get themself
+	// Special case to let user get (but not modify or delete) themself
 	subpath, _ := utils.GetSubpathFromConfig(a.Config())
-	if rctx.Path() == path.Join(subpath, "/api/v4/users/me") {
+	if method == http.MethodGet && rctx.Path() == path.Join(subpath, "/api/v4/users/me") {
 		return nil
 	}
 
@@ -427,14 +427,14 @@ func (a *App) authenticateUser(rctx request.CTX, user *model.User, password, mfa
 		return user, err
 	}
 
-	// if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, password, mfaToken); err != nil {
-	// 	if err.Id == "api.user.check_user_password.invalid.app_error" {
-	// 		rctx.Logger().LogM(mlog.MlvlLDAPInfo, "A user tried to sign in, which matched a Mattermost account, but the password was incorrect.", mlog.String("username", user.Username))
-	// 	}
+	if err := a.CheckPasswordAndAllCriteria(rctx, user.Id, password, mfaToken); err != nil {
+		if err.Id == "api.user.check_user_password.invalid.app_error" {
+			rctx.Logger().LogM(mlog.MlvlLDAPInfo, "A user tried to sign in, which matched a Mattermost account, but the password was incorrect.", mlog.String("username", user.Username))
+		}
 
-	// 	err.StatusCode = http.StatusUnauthorized
-	// 	return user, err
-	// }
+		err.StatusCode = http.StatusUnauthorized
+		return user, err
+	}
 
 	return user, nil
 }

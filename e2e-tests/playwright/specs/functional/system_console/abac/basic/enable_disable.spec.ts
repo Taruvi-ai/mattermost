@@ -11,6 +11,8 @@ import {ensureUserAttributes} from '../support';
  */
 test.describe('ABAC Basic Operations - Enable/Disable', () => {
     test('MM-T5782 System admin can enable or disable system-wide ABAC', async ({pw}) => {
+        test.setTimeout(120000);
+
         // # Skip test if no license for ABAC
         await pw.skipIfNoLicense();
 
@@ -20,6 +22,15 @@ test.describe('ABAC Basic Operations - Enable/Disable', () => {
         // # Ensure user attributes exist BEFORE logging in
         await ensureUserAttributes(adminClient);
 
+        // # Reset ABAC to disabled via API before testing the UI toggle.
+        // initSetup and parallel tests enable it, which would leave the radio
+        // pre-selected and the Save button permanently disabled (no dirty state).
+        await adminClient.patchConfig({
+            AccessControlSettings: {
+                EnableAttributeBasedAccessControl: false,
+            },
+        } as any);
+
         // # Now login - this ensures the UI will have the attributes loaded
         const {systemConsolePage} = await pw.testBrowser.login(adminUser);
 
@@ -27,6 +38,22 @@ test.describe('ABAC Basic Operations - Enable/Disable', () => {
         await systemConsolePage.goto();
         await systemConsolePage.toBeVisible();
         await systemConsolePage.sidebar.systemAttributes.attributeBasedAccess.click();
+
+        // Re-apply the ABAC=false reset right before UI interaction: a concurrent
+        // initSetup() on another shard may have re-enabled ABAC between the initial
+        // patchConfig call above and here. If it's already enabled when we click
+        // enableRadio the radio is a no-op and Save stays disabled.
+        await adminClient.patchConfig({
+            AccessControlSettings: {
+                EnableAttributeBasedAccessControl: false,
+            },
+        } as any);
+        await pw.waitUntil(async () => {
+            const cfg = await adminClient.getConfig();
+            return cfg.AccessControlSettings?.EnableAttributeBasedAccessControl === false;
+        });
+        await systemConsolePage.page.reload();
+        await systemConsolePage.page.waitForLoadState('networkidle');
 
         // * Verify we're on the correct page
         const abacSection = systemConsolePage.page.getByTestId('sysconsole_section_AttributeBasedAccessControl');
@@ -46,11 +73,22 @@ test.describe('ABAC Basic Operations - Enable/Disable', () => {
         await saveButton.click();
         await systemConsolePage.page.waitForLoadState('networkidle');
 
-        // * Verify policy management UI is visible when enabled
-        const addPolicyButton = systemConsolePage.page.getByRole('button', {name: 'Add policy'});
-        const runSyncJobButton = systemConsolePage.page.getByRole('button', {name: 'Run Sync Job'});
-        await expect(addPolicyButton).toBeVisible();
-        await expect(runSyncJobButton).toBeVisible();
+        // * Verify the Attribute-Based Access page only has the toggle — no policy management here
+        await expect(systemConsolePage.page.getByRole('button', {name: 'Add policy'})).not.toBeVisible();
+
+        // * Verify Membership Policies page shows "Add policy" when ABAC is enabled
+        await systemConsolePage.page.goto('/admin_console/system_attributes/membership_policies');
+        await systemConsolePage.page.waitForLoadState('networkidle');
+        await expect(systemConsolePage.page.getByRole('button', {name: 'Add policy'})).toBeVisible();
+
+        // * Verify Permission Policies page shows "Add policy" when ABAC is enabled
+        await systemConsolePage.page.goto('/admin_console/system_attributes/permission_policies');
+        await systemConsolePage.page.waitForLoadState('networkidle');
+        await expect(systemConsolePage.page.getByRole('button', {name: 'Add policy'})).toBeVisible();
+
+        // # Navigate back to Attribute-Based Access to test disable
+        await systemConsolePage.page.goto('/admin_console/system_attributes/attribute_based_access_control');
+        await systemConsolePage.page.waitForLoadState('networkidle');
 
         // # Test disable ABAC
         await disableRadio.click();
@@ -58,11 +96,14 @@ test.describe('ABAC Basic Operations - Enable/Disable', () => {
         await saveButton.click();
         await systemConsolePage.page.waitForLoadState('networkidle');
 
-        // * Verify policy management UI is hidden when disabled
-        await expect(addPolicyButton).not.toBeVisible();
-        await expect(runSyncJobButton).not.toBeVisible();
+        // * Verify Membership Policies no longer shows "Add policy" when ABAC is disabled
+        await systemConsolePage.page.goto('/admin_console/system_attributes/membership_policies');
+        await systemConsolePage.page.waitForLoadState('networkidle');
+        await expect(systemConsolePage.page.getByRole('button', {name: 'Add policy'})).not.toBeVisible();
 
         // # Re-enable ABAC for subsequent tests
+        await systemConsolePage.page.goto('/admin_console/system_attributes/attribute_based_access_control');
+        await systemConsolePage.page.waitForLoadState('networkidle');
         await enableRadio.click();
         await saveButton.click();
         await systemConsolePage.page.waitForLoadState('networkidle');

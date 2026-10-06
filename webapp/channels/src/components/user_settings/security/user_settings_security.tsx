@@ -750,17 +750,6 @@ export class SecurityTab extends React.PureComponent<Props, State> {
                 );
             }
 
-            if (user.auth_service === Constants.MAGIC_LINK_SERVICE) {
-                extraInfo = (
-                    <span>
-                        <FormattedMessage
-                            id='user.settings.security.magicLinkInfo'
-                            defaultMessage='Magic Link is the only sign-in method available for this account.'
-                        />
-                    </span>
-                );
-            }
-
             max = (
                 <SettingItemMax
                     title={this.props.intl.formatMessage({

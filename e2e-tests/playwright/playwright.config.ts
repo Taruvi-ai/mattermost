@@ -3,13 +3,32 @@
 
 import {defineConfig, devices} from '@playwright/test';
 
-import {duration, testConfig} from '@mattermost/playwright-lib';
+import {
+    assertUpgradeFromFreshStart,
+    assertUpgradeToRequiresPriorFromRun,
+    duration,
+    isUpgradeFromProjectSelected,
+    isUpgradeToPhaseProjectSelected,
+    logUpgradeFromServerImage,
+    logUpgradeToServerImage,
+    testConfig,
+} from '@mattermost/playwright-lib';
+
+if (isUpgradeFromProjectSelected()) {
+    assertUpgradeFromFreshStart();
+    logUpgradeFromServerImage();
+}
+
+if (isUpgradeToPhaseProjectSelected()) {
+    assertUpgradeToRequiresPriorFromRun();
+    logUpgradeToServerImage();
+}
 
 export default defineConfig({
     globalSetup: './global_setup.ts',
     forbidOnly: testConfig.isCI,
     outputDir: './results/output',
-    retries: testConfig.isCI ? 2 : 0,
+    retries: testConfig.isCI ? 1 : 0,
     testDir: 'specs',
     timeout: duration.one_min,
     workers: testConfig.workers,
@@ -40,7 +59,7 @@ export default defineConfig({
         },
         screenshot: 'only-on-failure',
         timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
-        trace: 'off',
+        trace: 'retain-on-failure-and-retries',
         video: 'retain-on-failure',
         actionTimeout: duration.half_min,
     },
@@ -72,6 +91,23 @@ export default defineConfig({
                 viewport: {width: 1280, height: 1024},
             },
             dependencies: ['setup'],
+        },
+        // Upgrade-path specs live under upgrade-specs/ (outside testDir) so Test System IO
+        // dispatch-begin does not register them in the full Playwright queue.
+        {
+            name: 'upgrade-from',
+            testDir: 'upgrade-specs/from',
+            dependencies: ['setup'],
+            fullyParallel: false,
+            workers: 1,
+        },
+        {name: 'upgrade-swap-to', testDir: 'upgrade-specs', testMatch: /upgrade_swap_to\.ts/},
+        {
+            name: 'upgrade-to',
+            testDir: 'upgrade-specs/to',
+            dependencies: ['upgrade-swap-to'],
+            fullyParallel: false,
+            workers: 1,
         },
     ],
     reporter: [

@@ -90,6 +90,7 @@ type Store interface {
 	DesktopTokens() DesktopTokensStore
 	ChannelBookmark() ChannelBookmarkStore
 	ScheduledPost() ScheduledPostStore
+	View() ViewStore
 	PropertyGroup() PropertyGroupStore
 	PropertyField() PropertyFieldStore
 	PropertyValue() PropertyValueStore
@@ -274,6 +275,7 @@ type ChannelStore interface {
 	GetMembersForUserWithCursorPagination(userId string, perPage int, fromChanneID string) (model.ChannelMembersWithTeamData, error)
 	Autocomplete(rctx request.CTX, userID, term string, includeDeleted, isGuest bool) (model.ChannelListWithTeamData, error)
 	AutocompleteInTeam(rctx request.CTX, teamID, userID, term string, includeDeleted, isGuest bool) (model.ChannelList, error)
+	AutocompleteInTeamFiltered(rctx request.CTX, teamID, userID, term string, includeDeleted, isGuest, privateOnly, excludeGroupConstrained bool) (model.ChannelList, error)
 	AutocompleteInTeamForSearch(teamID string, userID string, term string, includeDeleted bool) (model.ChannelList, error)
 	SearchAllChannels(term string, opts ChannelSearchOpts) (model.ChannelListWithTeamData, int64, error)
 	SearchInTeam(teamID string, term string, includeDeleted bool) (model.ChannelList, error)
@@ -334,6 +336,7 @@ type ChannelMemberHistoryStore interface {
 	DeleteOrphanedRows(limit int) (deleted int64, err error)
 	PermanentDeleteBatch(endTime int64, limit int64) (int64, error)
 	GetChannelsLeftSince(userID string, since int64) ([]string, error)
+	GetMembershipChanges(channelID string, since int64, limit int) ([]*model.ChannelMemberHistory, error)
 }
 type ThreadStore interface {
 	GetThreadFollowers(threadID string, fetchOnlyActive bool) ([]string, error)
@@ -569,7 +572,13 @@ type RemoteClusterStore interface {
 	Update(rc *model.RemoteCluster) (*model.RemoteCluster, error)
 	Delete(remoteClusterID string) (bool, error)
 	Get(remoteClusterID string, includeDeleted bool) (*model.RemoteCluster, error)
+	// Deprecated: GetByPluginID returns a single remote for the plugin. Only correct
+	// when the plugin has one registration. Use GetAllByPluginID instead.
 	GetByPluginID(pluginID string) (*model.RemoteCluster, error)
+	// GetAllByPluginID returns all remotes registered by the specified plugin.
+	GetAllByPluginID(pluginID string) ([]*model.RemoteCluster, error)
+	// GetBySiteURL returns the remote cluster with the given SiteURL, or an error if not found.
+	GetBySiteURL(siteURL string) (*model.RemoteCluster, error)
 	GetAll(offset, limit int, filter model.RemoteClusterQueryFilter) ([]*model.RemoteCluster, error)
 	UpdateTopics(remoteClusterID string, topics string) (*model.RemoteCluster, error)
 	SetLastPingAt(remoteClusterID string) error
@@ -788,7 +797,6 @@ type ReactionStore interface {
 	GetUniqueCountForPost(postID string) (int, error)
 	ExistsOnPost(postID string, emojiName string) (bool, error)
 	DeleteAllWithEmojiName(emojiName string) error
-	BulkGetForPosts(postIds []string) ([]*model.Reaction, error)
 	GetSingle(userID, postID, remoteID, emojiName string) (*model.Reaction, error)
 	DeleteOrphanedRowsByIds(r *model.RetentionIdsForDeletion) (int64, error)
 	PermanentDeleteBatch(endTime int64, limit int64) (int64, error)
@@ -846,6 +854,10 @@ type PluginStore interface {
 
 type RoleStore interface {
 	Save(role *model.Role) (*model.Role, error)
+	// SavePreservingUnknownPermissions behaves like Save but tolerates and preserves
+	// permissions not recognized by this server build instead of rejecting the role.
+	// Unrecognized permissions are logged (see MM-68830).
+	SavePreservingUnknownPermissions(role *model.Role) (*model.Role, error)
 	Get(roleID string) (*model.Role, error)
 	GetAll() ([]*model.Role, error)
 	GetByName(ctx context.Context, name string) (*model.Role, error)
@@ -1040,9 +1052,7 @@ type SharedChannelStore interface {
 	GetSingleUser(userID string, channelID string, remoteID string) (*model.SharedChannelUser, error)
 	GetUsersForUser(userID string) ([]*model.SharedChannelUser, error)
 	GetUsersForSync(filter model.GetUsersForSyncFilter) ([]*model.User, error)
-	GetUserChanges(userID string, channelID string, afterTime int64) ([]*model.SharedChannelUser, error)
 	UpdateUserLastSyncAt(userID string, channelID string, remoteID string) error
-	UpdateUserLastMembershipSyncAt(userID string, channelID string, remoteID string, syncTime int64) error
 
 	SaveAttachment(remote *model.SharedChannelAttachment) (*model.SharedChannelAttachment, error)
 	UpsertAttachment(remote *model.SharedChannelAttachment) (string, error)
@@ -1102,6 +1112,16 @@ type ChannelBookmarkStore interface {
 	GetBookmarksForChannelSince(channelID string, since int64) ([]*model.ChannelBookmarkWithFileInfo, error)
 }
 
+type ViewStore interface {
+	Save(view *model.View) (*model.View, error)
+	Get(id string) (*model.View, error)
+	GetForChannel(channelID string, opts model.ViewQueryOpts) ([]*model.View, error)
+	CountForChannel(channelID string, opts model.ViewQueryOpts) (int64, error)
+	Update(view *model.View) (*model.View, error)
+	Delete(viewID string, deleteAt int64) error
+	UpdateSortOrder(viewID, channelID string, newIndex int64) ([]*model.View, error)
+}
+
 type ScheduledPostStore interface {
 	GetMaxMessageSize() int
 	CreateScheduledPost(scheduledPost *model.ScheduledPost) (*model.ScheduledPost, error)
@@ -1129,6 +1149,7 @@ type PropertyFieldStore interface {
 	SearchPropertyFields(opts model.PropertyFieldSearchOpts) ([]*model.PropertyField, error)
 	Update(groupID string, fields []*model.PropertyField) ([]*model.PropertyField, error)
 	Delete(groupID string, id string) error
+	CheckPropertyNameConflict(field *model.PropertyField, excludeID string) (model.PropertyFieldTargetLevel, error)
 }
 
 type PropertyValueStore interface {

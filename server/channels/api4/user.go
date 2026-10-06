@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blang/semver/v4"
+	"github.com/Masterminds/semver/v3"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/mlog"
 
@@ -1450,6 +1450,8 @@ func patchUser(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	patch.RemoteId = nil
+
 	auditRec := c.MakeAuditRecord(model.AuditEventPatchUser, model.AuditStatusFail)
 	model.AddEventParameterAuditableToAuditRec(auditRec, "user_patch", &patch)
 	defer c.LogAuditRec(auditRec)
@@ -1677,6 +1679,13 @@ func updateUserActive(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if user.IsBot {
+		if permErr := c.App.SessionHasPermissionToManageBot(c.AppContext, *c.AppContext.Session(), c.Params.UserId); permErr != nil {
+			c.Err = permErr
+			return
+		}
+	}
+
 	if active && user.IsGuest() && !*c.App.Config().GuestAccountsSettings.Enable {
 		c.Err = model.NewAppError("updateUserActive", "api.user.update_active.cannot_enable_guest_when_guest_feature_is_disabled.app_error", nil, "userId="+c.Params.UserId, http.StatusUnauthorized)
 		return
@@ -1776,7 +1785,7 @@ func updateUserMfa(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if appErr := c.App.MFARequired(c.AppContext); !c.AppContext.Session().Local && c.AppContext.Session().UserId != c.Params.UserId && appErr != nil {
+	if appErr := c.App.MFARequired(c.AppContext, r.Method); !c.AppContext.Session().Local && c.AppContext.Session().UserId != c.Params.UserId && appErr != nil {
 		c.Err = appErr
 		return
 	}
@@ -1928,16 +1937,17 @@ func resetPassword(c *Context, w http.ResponseWriter, r *http.Request) {
 
 	auditRec := c.MakeAuditRecord(model.AuditEventResetPassword, model.AuditStatusFail)
 	defer c.LogAuditRec(auditRec)
-	c.LogAudit("attempt - token=" + token)
+	tokenPrefix := token[:5]
+	c.LogAudit("attempt - token_prefix=" + tokenPrefix)
 
 	if err := c.App.ResetPasswordFromToken(c.AppContext, token, newPassword); err != nil {
-		c.LogAudit("fail - token=" + token)
+		c.LogAudit("fail - token_prefix=" + tokenPrefix)
 		c.Err = err
 		return
 	}
 
 	auditRec.Success()
-	c.LogAudit("success - token=" + token)
+	c.LogAudit("success - token_prefix=" + tokenPrefix)
 
 	ReturnStatusOK(w)
 }
@@ -2069,6 +2079,12 @@ func login(c *Context, w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			c.LogAudit("failure - guest_magic_link")
 			c.Err = err
+			return
+		}
+
+		if authErr := c.App.CheckUserAllAuthenticationCriteria(c.AppContext, user, ""); authErr != nil {
+			c.LogAuditWithUserId(user.Id, "failure - guest_magic_link")
+			c.Err = authErr
 			return
 		}
 	} else {
@@ -2341,7 +2357,7 @@ func getLoginType(c *Context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	if canSendMagicLinkEmail(user) {
-		eErr := c.App.Srv().EmailService.SendMagicLinkEmailSelfService(user.Email, c.App.GetSiteURL())
+		eErr := c.App.Srv().EmailService.SendMagicLinkEmailSelfService(c.AppContext, user.Email, c.App.GetSiteURL())
 		if eErr != nil {
 			switch {
 			case errors.Is(eErr, email.NoRateLimiterError):
@@ -2549,7 +2565,7 @@ func handleDeviceProps(c *Context, w http.ResponseWriter, r *http.Request) {
 
 	mobileVersion := receivedProps[model.SessionPropMobileVersion]
 	if mobileVersion != "" {
-		if _, err := semver.Parse(mobileVersion); err != nil {
+		if _, err := semver.StrictNewVersion(mobileVersion); err != nil {
 			c.SetInvalidParam(model.SessionPropMobileVersion)
 			return
 		}
@@ -2608,7 +2624,7 @@ func attachDeviceId(c *Context, w http.ResponseWriter, r *http.Request, deviceId
 		Secure:   secure,
 	}
 
-	if secure {
+	if secure && utils.CheckEmbeddedCookie(r) {
 		sessionCookie.SameSite = http.SameSiteNoneMode
 	}
 
@@ -2734,6 +2750,12 @@ func switchAccountType(c *Context, w http.ResponseWriter, r *http.Request) {
 	} else if switchRequest.OAuthToEmail() {
 		c.SessionRequired()
 		if c.Err != nil {
+			return
+		}
+
+		if c.AppContext.Session().IsOAuth {
+			c.SetPermissionError(model.PermissionEditOtherUsers)
+			c.Err.DetailedError += ", attempted access by oauth app"
 			return
 		}
 
@@ -2966,6 +2988,12 @@ func revokeUserAccessToken(c *Context, w http.ResponseWriter, r *http.Request) {
 	model.AddEventParameterToAuditRec(auditRec, "token_id", tokenId)
 	c.LogAudit("")
 
+	if c.AppContext.Session().IsOAuth {
+		c.SetPermissionError(model.PermissionRevokeUserAccessToken)
+		c.Err.DetailedError += ", attempted access by oauth app"
+		return
+	}
+
 	if !c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionRevokeUserAccessToken) {
 		c.SetPermissionError(model.PermissionRevokeUserAccessToken)
 		return
@@ -3009,6 +3037,12 @@ func disableUserAccessToken(c *Context, w http.ResponseWriter, r *http.Request) 
 	model.AddEventParameterToAuditRec(auditRec, "token_id", tokenId)
 	defer c.LogAuditRec(auditRec)
 	c.LogAudit("")
+
+	if c.AppContext.Session().IsOAuth {
+		c.SetPermissionError(model.PermissionRevokeUserAccessToken)
+		c.Err.DetailedError += ", attempted access by oauth app"
+		return
+	}
 
 	// No separate permission for this action for now
 	if !c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionRevokeUserAccessToken) {
@@ -3054,6 +3088,12 @@ func enableUserAccessToken(c *Context, w http.ResponseWriter, r *http.Request) {
 	defer c.LogAuditRec(auditRec)
 	model.AddEventParameterToAuditRec(auditRec, "token_id", tokenId)
 	c.LogAudit("")
+
+	if c.AppContext.Session().IsOAuth {
+		c.SetPermissionError(model.PermissionCreateUserAccessToken)
+		c.Err.DetailedError += ", attempted access by oauth app"
+		return
+	}
 
 	// No separate permission for this action for now
 	if !c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionCreateUserAccessToken) {

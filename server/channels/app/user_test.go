@@ -8,8 +8,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	_ "image/jpeg"
+	_ "image/png"
 	"net/http"
-	"os"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,6 +24,7 @@ import (
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/mattermost/mattermost/server/public/shared/request"
 	oauthgitlab "github.com/mattermost/mattermost/server/v8/channels/app/oauthproviders/gitlab"
+	"github.com/mattermost/mattermost/server/v8/channels/app/users"
 	"github.com/mattermost/mattermost/server/v8/channels/store"
 	storemocks "github.com/mattermost/mattermost/server/v8/channels/store/storetest/mocks"
 	"github.com/mattermost/mattermost/server/v8/channels/utils/testutils"
@@ -140,11 +143,28 @@ func TestAdjustProfileImage(t *testing.T) {
 
 	// default image should not require adjustment
 	user := th.BasicUser
-	image, appErr := th.App.GetDefaultProfileImage(user)
+	defaultImg, appErr := th.App.GetDefaultProfileImage(user)
 	require.Nil(t, appErr)
-	image2, appErr := th.App.AdjustImage(th.Context, bytes.NewReader(image))
+	image2, appErr := th.App.AdjustImage(th.Context, bytes.NewReader(defaultImg))
 	require.Nil(t, appErr)
-	assert.Equal(t, image, image2.Bytes())
+	assert.Equal(t, defaultImg, image2.Bytes())
+
+	t.Run("EXIF orientation is applied for rotated images", func(t *testing.T) {
+		// quadrants-orientation-8.png: 128×128 color quadrants with EXIF orientation 8.
+		// quadrants-orientation-1.png: same visual content already rotated, EXIF orientation 1.
+		rotated, err := testutils.ReadTestFile("exif_samples/quadrants-orientation-8.png")
+		require.NoError(t, err)
+		normal, err := testutils.ReadTestFile("exif_samples/quadrants-orientation-1.png")
+		require.NoError(t, err)
+
+		rotatedResult, appErr := th.App.AdjustImage(th.Context, bytes.NewReader(rotated))
+		require.Nil(t, appErr)
+		normalResult, appErr := th.App.AdjustImage(th.Context, bytes.NewReader(normal))
+		require.Nil(t, appErr)
+
+		assert.Equal(t, rotatedResult.Bytes(), normalResult.Bytes(),
+			"EXIF-rotated image should produce the same profile picture as the normally-oriented one")
+	})
 }
 
 func TestUpdateUserToRestrictedDomain(t *testing.T) {
@@ -248,6 +268,41 @@ func TestUpdateUser(t *testing.T) {
 		require.NotNil(t, updatedUser)
 		require.Equal(t, updatedUser.LastPictureUpdate, iLastPictureUpdate)
 	})
+}
+
+func TestUpdateUserNilUpdateResult(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := SetupWithStoreMock(t)
+
+	fakeUserID := model.NewId()
+	mockUser := &model.User{
+		Id:       fakeUserID,
+		Username: "testuser",
+		Email:    "test@example.com",
+	}
+
+	mockUserStore := storemocks.UserStore{}
+	mockUserStore.On("Get", mock.Anything, mock.Anything).Return(mockUser, nil)
+	// Simulate a store that returns (nil, nil) — no error but no result
+	mockUserStore.On("Update", mock.Anything, mock.Anything, mock.Anything).Return(nil, nil)
+
+	mockSessionStore := storemocks.SessionStore{}
+	mockOAuthStore := storemocks.OAuthStore{}
+
+	var err error
+	th.App.ch.srv.userService, err = users.New(users.ServiceConfig{
+		UserStore:    &mockUserStore,
+		SessionStore: &mockSessionStore,
+		OAuthStore:   &mockOAuthStore,
+		ConfigFn:     th.App.ch.srv.platform.Config,
+		LicenseFn:    th.App.ch.srv.License,
+	})
+	require.NoError(t, err)
+
+	updatedUser, appErr := th.App.UpdateUser(th.Context, mockUser, false)
+	require.Nil(t, updatedUser, "expected nil user when store returns nil update")
+	require.NotNil(t, appErr, "expected error when store returns nil update")
+	require.Equal(t, "app.user.update.find.app_error", appErr.Id)
 }
 
 func TestUpdateUserMissingFields(t *testing.T) {
@@ -421,6 +476,73 @@ func TestUpdateActiveBotsSideEffect(t *testing.T) {
 
 	_, appErr = th.App.UpdateActive(th.Context, th.BasicUser, true)
 	require.Nil(t, appErr)
+}
+
+func TestUserDeactivationRevokesOAuthAccessTokens(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) { *cfg.ServiceSettings.EnableOAuthServiceProvider = true })
+
+	oapp := &model.OAuthApp{
+		Name:         "DeactivationCleanup_" + model.NewRandomString(10),
+		CreatorId:    th.BasicUser2.Id,
+		Homepage:     "https://nowhere.com",
+		Description:  "test",
+		CallbackUrls: []string{"https://example.com/callback"},
+		ClientSecret: model.NewId(),
+	}
+	oapp, appErr := th.App.CreateOAuthApp(oapp)
+	require.Nil(t, appErr)
+
+	user := th.CreateUser(t)
+
+	authRequest := &model.AuthorizeRequest{
+		ResponseType: model.AuthCodeResponseType,
+		ClientId:     oapp.Id,
+		RedirectURI:  oapp.CallbackUrls[0],
+		Scope:        "user",
+		State:        "test_state",
+	}
+
+	redirectURL, appErr := th.App.AllowOAuthAppAccessToUser(th.Context, user.Id, authRequest)
+	require.Nil(t, appErr)
+
+	uri, parseErr := url.Parse(redirectURL)
+	require.NoError(t, parseErr)
+	code := uri.Query().Get("code")
+	require.NotEmpty(t, code)
+
+	tokenResp, appErr := th.App.GetOAuthAccessTokenForCodeFlow(
+		th.Context,
+		oapp.Id,
+		model.AccessTokenGrantType,
+		oapp.CallbackUrls[0],
+		code,
+		oapp.ClientSecret,
+		"",
+		"",
+		"",
+	)
+	require.Nil(t, appErr)
+	require.NotEmpty(t, tokenResp.AccessToken)
+	require.NotEmpty(t, tokenResp.RefreshToken)
+
+	require.NoError(t, th.App.Srv().Store().Session().Remove(tokenResp.AccessToken))
+
+	preDeactivation, sErr := th.App.Srv().Store().OAuth().GetAccessDataByUserForApp(user.Id, oapp.Id)
+	require.NoError(t, sErr)
+	require.NotEmpty(t, preDeactivation)
+
+	_, appErr = th.App.UpdateActive(th.Context, user, false)
+	require.Nil(t, appErr)
+
+	postDeactivation, sErr := th.App.Srv().Store().OAuth().GetAccessDataByUserForApp(user.Id, oapp.Id)
+	require.NoError(t, sErr)
+	require.Empty(t, postDeactivation, "oauth access tokens for an inactive user must be removed")
+
+	_, sErr = th.App.Srv().Store().OAuth().GetAccessDataByRefreshToken(tokenResp.RefreshToken)
+	require.Error(t, sErr, "refresh token row for an inactive user must be removed")
 }
 
 func TestUpdateOAuthUserAttrs(t *testing.T) {
@@ -942,7 +1064,7 @@ func TestGetUsersNotInAbacChannel(t *testing.T) {
 		mockAccessControl.On("QueryUsersForResource",
 			mock.Anything,
 			abacChannel.Id,
-			"*",
+			model.AccessControlPolicyActionMembership,
 			mock.MatchedBy(func(opts model.SubjectSearchOptions) bool {
 				return opts.TeamID == th.BasicTeam.Id &&
 					opts.Limit == 50 &&
@@ -973,7 +1095,7 @@ func TestGetUsersNotInAbacChannel(t *testing.T) {
 		mockAccessControl.On("QueryUsersForResource",
 			mock.Anything,
 			abacChannel.Id,
-			"*",
+			model.AccessControlPolicyActionMembership,
 			mock.MatchedBy(func(opts model.SubjectSearchOptions) bool {
 				return opts.TeamID == th.BasicTeam.Id &&
 					opts.Limit == 25 &&
@@ -1958,6 +2080,18 @@ func TestDemoteUserToGuest(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
 
+	t.Run("Must reject bot user", func(t *testing.T) {
+		bot := th.CreateBot(t)
+		user, err := th.App.GetUser(bot.UserId)
+		require.Nil(t, err)
+		require.True(t, user.IsBot)
+
+		appErr := th.App.DemoteUserToGuest(th.Context, user)
+		require.NotNil(t, appErr)
+		assert.Equal(t, "api.user.demote_user_to_guest.bot_not_allowed.app_error", appErr.Id)
+		assert.Equal(t, http.StatusBadRequest, appErr.StatusCode)
+	})
+
 	t.Run("Must invalidate channel stats cache when demoting a user", func(t *testing.T) {
 		user := th.CreateUser(t)
 		require.Equal(t, "system_user", user.Roles)
@@ -2308,6 +2442,85 @@ func TestUpdateThreadReadForUser(t *testing.T) {
 	})
 }
 
+func TestGetThreadsForUserSanitizesRootPost(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) {
+		*cfg.ServiceSettings.ThreadAutoFollow = true
+		*cfg.ServiceSettings.CollapsedThreads = model.CollapsedThreadsDefaultOn
+	})
+
+	appErr := th.App.JoinChannel(th.Context, th.BasicChannel, th.BasicUser.Id)
+	require.Nil(t, appErr)
+	appErr = th.App.JoinChannel(th.Context, th.BasicChannel, th.BasicUser2.Id)
+	require.Nil(t, appErr)
+
+	assertSanitized := func(t *testing.T, post *model.Post) {
+		t.Helper()
+
+		require.NotNil(t, post)
+		attachments := post.Attachments()
+		require.Len(t, attachments, 1)
+		require.Len(t, attachments[0].Actions, 1)
+		assert.Equal(t, "action", attachments[0].Actions[0].Name, "non-secret attachment data must be preserved")
+		assert.Nil(t, attachments[0].Actions[0].Integration)
+
+		postJSON, err := json.Marshal(post)
+		require.NoError(t, err)
+		assert.NotContains(t, string(postJSON), "secret-endpoint")
+		assert.NotContains(t, string(postJSON), "secret_marker")
+	}
+
+	rootPost, _, appErr := th.App.CreatePost(th.Context, &model.Post{
+		UserId:    th.BasicUser.Id,
+		ChannelId: th.BasicChannel.Id,
+		Message:   "interactive root",
+		Props: model.StringInterface{
+			model.PostPropsAttachments: []*model.MessageAttachment{
+				{
+					Text: "hello",
+					Actions: []*model.PostAction{
+						{
+							Type: model.PostActionTypeButton,
+							Name: "action",
+							Integration: &model.PostActionIntegration{
+								URL:     "http://localhost:8065/secret-endpoint",
+								Context: map[string]any{"secret_marker": "s3cr3t"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}, th.BasicChannel, model.CreatePostFlags{})
+	require.Nil(t, appErr)
+
+	_, _, appErr = th.App.CreatePost(th.Context, &model.Post{
+		UserId:    th.BasicUser2.Id,
+		ChannelId: th.BasicChannel.Id,
+		RootId:    rootPost.Id,
+		Message:   "reply",
+	}, th.BasicChannel, model.CreatePostFlags{})
+	require.Nil(t, appErr)
+
+	t.Run("GetThreadForUser strips action integrations from the root post", func(t *testing.T) {
+		threadMembership, appErr := th.App.GetThreadMembershipForUser(th.BasicUser2.Id, rootPost.Id)
+		require.Nil(t, appErr)
+
+		thread, appErr := th.App.GetThreadForUser(th.Context, threadMembership, false)
+		require.Nil(t, appErr)
+		assertSanitized(t, thread.Post)
+	})
+
+	t.Run("GetThreadsForUser strips action integrations from the root post", func(t *testing.T) {
+		threads, appErr := th.App.GetThreadsForUser(th.Context, th.BasicUser2.Id, th.BasicTeam.Id, model.GetUserThreadsOpts{PageSize: 10})
+		require.Nil(t, appErr)
+		require.Len(t, threads.Threads, 1)
+		assertSanitized(t, threads.Threads[0].Post)
+	})
+}
+
 func TestCreateUserWithInitialPreferences(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
@@ -2520,9 +2733,11 @@ func TestGetUsersForReporting(t *testing.T) {
 
 // Helper functions for remote user testing
 func setupRemoteClusterTest(t *testing.T) (*TestHelper, store.Store) {
-	os.Setenv("MM_FEATUREFLAGS_ENABLESHAREDCHANNELSDMS", "true")
-	t.Cleanup(func() { os.Unsetenv("MM_FEATUREFLAGS_ENABLESHAREDCHANNELSDMS") })
 	th := setupSharedChannels(t).InitBasic(t)
+
+	// Enable SharedChannelsDMs feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.EnableSharedChannelsDMs = true })
+
 	return th, th.App.Srv().Store()
 }
 
@@ -2546,10 +2761,7 @@ func createTestRemoteCluster(t *testing.T, th *TestHelper, ss store.Store, name,
 
 func createRemoteUser(t *testing.T, th *TestHelper, remoteCluster *model.RemoteCluster) *model.User {
 	user := th.CreateUser(t)
-	user.RemoteId = &remoteCluster.RemoteId
-	updatedUser, appErr := th.App.UpdateUser(th.Context, user, false)
-	require.Nil(t, appErr)
-	return updatedUser
+	return th.SetUserRemoteID(t, user.Id, remoteCluster.RemoteId)
 }
 
 func ensureRemoteClusterConnected(t *testing.T, ss store.Store, cluster *model.RemoteCluster, connected bool) {

@@ -65,6 +65,11 @@ const (
 	UserTimezoneMaxRunes  = 256
 	UserRolesMaxLength    = 256
 
+	// MentionKeysMaxCount is the maximum number of individual mention keys a user may have.
+	MentionKeysMaxCount = 500
+	// MentionKeysMaxLength is the maximum byte length of the comma-separated mention_keys string.
+	MentionKeysMaxLength = 50000
+
 	DesktopTokenTTL = time.Minute * 3
 
 	UserAuthServiceMagicLink = "magic_link"
@@ -84,41 +89,41 @@ type UserPasswordHasher interface {
 // This struct's serializer methods are auto-generated. If a new field is added/removed,
 // please run make gen-serialized.
 type User struct {
-	Id                     string      `json:"id"`
-	CreateAt               int64       `json:"create_at,omitempty"`
-	UpdateAt               int64       `json:"update_at,omitempty"`
-	DeleteAt               int64       `json:"delete_at"`
-	Username               string      `json:"username"`
-	Password               string      `json:"password,omitempty"`
-	AuthData               *string     `json:"auth_data,omitempty"`
-	AuthService            string      `json:"auth_service"`
-	Email                  string      `json:"email"`
-	EmailVerified          bool        `json:"email_verified,omitempty"`
-	Nickname               string      `json:"nickname"`
-	FirstName              string      `json:"first_name"`
-	LastName               string      `json:"last_name"`
-	Position               string      `json:"position"`
-	Roles                  string      `json:"roles"`
-	AllowMarketing         bool        `json:"allow_marketing,omitempty"`
-	Props                  StringMap   `json:"props,omitempty"`
-	NotifyProps            StringMap   `json:"notify_props,omitempty"`
-	LastPasswordUpdate     int64       `json:"last_password_update,omitempty"`
-	LastPictureUpdate      int64       `json:"last_picture_update,omitempty"`
-	FailedAttempts         int         `json:"failed_attempts,omitempty"`
-	Locale                 string      `json:"locale"`
-	Timezone               StringMap   `json:"timezone"`
-	MfaActive              bool        `json:"mfa_active,omitempty"`
-	MfaSecret              string      `json:"mfa_secret,omitempty"`
-	RemoteId               *string     `json:"remote_id,omitempty"`
-	LastActivityAt         int64       `json:"last_activity_at,omitempty"`
-	IsBot                  bool        `json:"is_bot,omitempty"`
-	BotDescription         string      `json:"bot_description,omitempty"`
-	BotLastIconUpdate      int64       `json:"bot_last_icon_update,omitempty"`
-	TermsOfServiceId       string      `json:"terms_of_service_id,omitempty"`
-	TermsOfServiceCreateAt int64       `json:"terms_of_service_create_at,omitempty"`
-	DisableWelcomeEmail    bool        `json:"disable_welcome_email"`
-	LastLogin              int64       `json:"last_login,omitempty"`
-	MfaUsedTimestamps      StringArray `json:"mfa_used_timestamps,omitempty"`
+	Id                     string      `json:"id" xml:"Id"`
+	CreateAt               int64       `json:"create_at,omitempty" xml:"CreateAt,omitempty"`
+	UpdateAt               int64       `json:"update_at,omitempty" xml:"UpdateAt,omitempty"`
+	DeleteAt               int64       `json:"delete_at" xml:"DeleteAt"`
+	Username               string      `json:"username" xml:"Username"`
+	Password               string      `json:"password,omitempty" xml:"-"`
+	AuthData               *string     `json:"auth_data,omitempty" xml:"-"`
+	AuthService            string      `json:"auth_service" xml:"AuthService"`
+	Email                  string      `json:"email" xml:"Email"`
+	EmailVerified          bool        `json:"email_verified,omitempty" xml:"EmailVerified,omitempty"`
+	Nickname               string      `json:"nickname" xml:"Nickname"`
+	FirstName              string      `json:"first_name" xml:"FirstName"`
+	LastName               string      `json:"last_name" xml:"LastName"`
+	Position               string      `json:"position" xml:"Position"`
+	Roles                  string      `json:"roles" xml:"Roles"`
+	AllowMarketing         bool        `json:"allow_marketing,omitempty" xml:"AllowMarketing,omitempty"`
+	Props                  StringMap   `json:"props,omitempty" xml:"Props,omitempty"`
+	NotifyProps            StringMap   `json:"notify_props,omitempty" xml:"NotifyProps,omitempty"`
+	LastPasswordUpdate     int64       `json:"last_password_update,omitempty" xml:"LastPasswordUpdate,omitempty"`
+	LastPictureUpdate      int64       `json:"last_picture_update,omitempty" xml:"LastPictureUpdate,omitempty"`
+	FailedAttempts         int         `json:"failed_attempts,omitempty" xml:"FailedAttempts,omitempty"`
+	Locale                 string      `json:"locale" xml:"Locale"`
+	Timezone               StringMap   `json:"timezone" xml:"Timezone"`
+	MfaActive              bool        `json:"mfa_active,omitempty" xml:"MfaActive,omitempty"`
+	MfaSecret              string      `json:"mfa_secret,omitempty" xml:"-"`
+	RemoteId               *string     `json:"remote_id,omitempty" xml:"RemoteId,omitempty"`
+	LastActivityAt         int64       `json:"last_activity_at,omitempty" xml:"LastActivityAt,omitempty"`
+	IsBot                  bool        `json:"is_bot,omitempty" xml:"IsBot,omitempty"`
+	BotDescription         string      `json:"bot_description,omitempty" xml:"BotDescription,omitempty"`
+	BotLastIconUpdate      int64       `json:"bot_last_icon_update,omitempty" xml:"BotLastIconUpdate,omitempty"`
+	TermsOfServiceId       string      `json:"terms_of_service_id,omitempty" xml:"TermsOfServiceId,omitempty"`
+	TermsOfServiceCreateAt int64       `json:"terms_of_service_create_at,omitempty" xml:"TermsOfServiceCreateAt,omitempty"`
+	DisableWelcomeEmail    bool        `json:"disable_welcome_email" xml:"DisableWelcomeEmail"`
+	LastLogin              int64       `json:"last_login,omitempty" xml:"LastLogin,omitempty"`
+	MfaUsedTimestamps      StringArray `json:"mfa_used_timestamps,omitempty" xml:"-"`
 }
 
 func (u *User) Auditable() map[string]any {
@@ -446,6 +451,12 @@ func (u *User) IsValid() *AppError {
 		}
 	}
 
+	if MentionKeysExceedLimits(u.NotifyProps[MentionKeysNotifyProp]) {
+		return NewAppError("User.IsValid", "model.user.is_valid.mention_keys.app_error",
+			map[string]any{"MaxCount": MentionKeysMaxCount, "MaxLength": MentionKeysMaxLength},
+			"user_id="+u.Id+" mention_keys=", http.StatusBadRequest)
+	}
+
 	return nil
 }
 
@@ -561,15 +572,9 @@ func (u *User) PreUpdate() {
 	if len(u.NotifyProps) == 0 {
 		u.SetDefaultNotifications()
 	} else if _, ok := u.NotifyProps[MentionKeysNotifyProp]; ok {
-		// Remove any blank mention keys
-		splitKeys := strings.Split(u.NotifyProps[MentionKeysNotifyProp], ",")
-		goodKeys := []string{}
-		for _, key := range splitKeys {
-			if key != "" {
-				goodKeys = append(goodKeys, strings.ToLower(key))
-			}
-		}
-		u.NotifyProps[MentionKeysNotifyProp] = strings.Join(goodKeys, ",")
+		// Normalize only, never cap: IsValid runs after PreUpdate, so trimming an
+		// over-limit value here would swallow the error it is meant to raise.
+		u.NotifyProps[MentionKeysNotifyProp] = joinMentionKeys(parseMentionKeys(u.NotifyProps[MentionKeysNotifyProp]))
 	}
 
 	if u.Props != nil {
@@ -597,6 +602,39 @@ func (u *User) SetDefaultNotifications() {
 	u.NotifyProps[PushThreadsNotifyProp] = UserNotifyAll
 }
 
+// parseMentionKeys splits raw on commas, trims whitespace, lowercases, and
+// returns only the non-empty segments. It does not enforce any size limits.
+func parseMentionKeys(raw string) []string {
+	var keys []string
+	for k := range strings.SplitSeq(raw, ",") {
+		if t := strings.ToLower(strings.TrimSpace(k)); t != "" {
+			keys = append(keys, t)
+		}
+	}
+	return keys
+}
+
+// MentionKeysExceedLimits reports whether raw exceeds the mention key limits,
+// either as given or once normalized.
+func MentionKeysExceedLimits(raw string) bool {
+	if len(raw) > MentionKeysMaxLength {
+		return true
+	}
+
+	keys := parseMentionKeys(raw)
+	if len(keys) > MentionKeysMaxCount {
+		return true
+	}
+
+	// Lowercasing can grow a key, so raw within the limit can normalize past it.
+	return len(joinMentionKeys(keys)) > MentionKeysMaxLength
+}
+
+// joinMentionKeys joins keys with commas, the inverse of parseMentionKeys.
+func joinMentionKeys(keys []string) string {
+	return strings.Join(keys, ",")
+}
+
 func (u *User) UpdateMentionKeysFromUsername(oldUsername string) {
 	nonUsernameKeys := []string{}
 	for _, key := range u.GetMentionKeys() {
@@ -611,17 +649,30 @@ func (u *User) UpdateMentionKeysFromUsername(oldUsername string) {
 	}
 }
 
+// GetMentionKeys returns the user's mention keys, normalized and truncated to
+// the mention key limits.
 func (u *User) GetMentionKeys() []string {
 	var keys []string
+	total := 0
 
-	for key := range strings.SplitSeq(u.NotifyProps[MentionKeysNotifyProp], ",") {
-		trimmedKey := strings.TrimSpace(key)
+	for k := range strings.SplitSeq(u.NotifyProps[MentionKeysNotifyProp], ",") {
+		if len(keys) == MentionKeysMaxCount {
+			break
+		}
 
-		if trimmedKey == "" {
+		key := strings.ToLower(strings.TrimSpace(k))
+		if key == "" {
 			continue
 		}
 
-		keys = append(keys, trimmedKey)
+		if total > 0 {
+			total++ // comma separator
+		}
+		if total += len(key); total > MentionKeysMaxLength {
+			break
+		}
+
+		keys = append(keys, key)
 	}
 
 	return keys

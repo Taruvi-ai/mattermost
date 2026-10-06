@@ -281,6 +281,10 @@ func (fs SqlFileInfoStore) GetWithOptions(page, perPage int, opt *model.GetFileI
 		query = query.Where("FileInfo.DeleteAt = 0")
 	}
 
+	if opt.OnlyEmptyContent {
+		query = query.Where("(FileInfo.Content IS NULL OR FileInfo.Content = '')")
+	}
+
 	if opt.SortBy == "" {
 		opt.SortBy = model.FileinfoSortByCreated
 	}
@@ -695,13 +699,7 @@ func (fs SqlFileInfoStore) GetFilesBatchForIndexing(startTime int64, startFileID
 	query := fs.getQueryBuilder().
 		Select(fs.queryFields...).
 		From("FileInfo").
-		Where(sq.Or{
-			sq.Gt{"FileInfo.CreateAt": startTime},
-			sq.And{
-				sq.Eq{"FileInfo.CreateAt": startTime},
-				sq.Gt{"FileInfo.Id": startFileID},
-			},
-		}).
+		Where("(FileInfo.CreateAt, FileInfo.Id) > (?, ?)", startTime, startFileID).
 		OrderBy("FileInfo.CreateAt ASC, FileInfo.Id ASC").
 		Limit(uint64(limit))
 
@@ -794,12 +792,15 @@ func (fs SqlFileInfoStore) RestoreForPostByIds(rctx request.CTX, postId string, 
 }
 
 func (fs SqlFileInfoStore) RefreshFileStats() error {
+	ctx, cancel := fs.analyticsContext()
+	defer cancel()
+
 	// CONCURRENTLY is not used deliberately because as per Postgres docs,
 	// not using CONCURRENTLY takes less resources and completes faster
 	// at the expense of locking the mat view. Since viewing admin console
 	// is not a very frequent activity, we accept the tradeoff to let the
 	// refresh happen as fast as possible.
-	if _, err := fs.GetMaster().Exec("REFRESH MATERIALIZED VIEW file_stats"); err != nil {
+	if _, err := fs.GetMaster().ExecContext(ctx, "REFRESH MATERIALIZED VIEW file_stats"); err != nil {
 		return errors.Wrap(err, "error refreshing materialized view file_stats")
 	}
 

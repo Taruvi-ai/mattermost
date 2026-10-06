@@ -128,9 +128,11 @@ export type ClientConfig = {
     FeatureFlagCallsEnabled: string;
     FeatureFlagCustomProfileAttributes: string;
     FeatureFlagAttributeBasedAccessControl: string;
+    FeatureFlagPermissionPolicies: string;
     FeatureFlagWebSocketEventScope: string;
     FeatureFlagInteractiveDialogAppsForm: string;
     FeatureFlagContentFlagging: string;
+    FeatureFlagManagedChannelCategories: string;
 
     ForgotPasswordLink: string;
     GiphySdkKey: string;
@@ -206,6 +208,7 @@ export type ClientConfig = {
     WebsocketSecurePort: string;
     WebsocketURL: string;
     ExperimentalSharedChannels: string;
+    ExperimentalRemoteClusterService: string;
     DisableAppBar: string;
     EnableComplianceExport: string;
     PostPriority: string;
@@ -486,6 +489,7 @@ export type SqlSettings = {
     Trace: boolean;
     AtRestEncryptKey: string;
     QueryTimeout: number;
+    AnalyticsQueryTimeout: number;
     DisableDatabaseSearch: boolean;
     MigrationsStatementTimeoutSeconds: number;
     ReplicaLagSettings: ReplicaLagSetting[];
@@ -555,6 +559,7 @@ export type FileSettings = {
     Directory: string;
     EnablePublicLink: boolean;
     ExtractContent: boolean;
+    ExtractContentTimeout: number;
     ArchiveRecursion: boolean;
     PublicLinkSalt: string;
     InitialFont: string;
@@ -688,6 +693,7 @@ export type SSOSettings = {
     DiscoveryEndpoint: string;
     ButtonText: string;
     ButtonColor: string;
+    UsePreferredUsername: boolean;
 };
 
 export type Office365Settings = {
@@ -700,6 +706,7 @@ export type Office365Settings = {
     UserAPIEndpoint: string;
     DiscoveryEndpoint: string;
     DirectoryId: string;
+    UsePreferredUsername: boolean;
 };
 
 export type LdapSettings = {
@@ -865,6 +872,7 @@ export type ExperimentalSettings = {
     UsersStatusAndProfileFetchingPollIntervalMilliseconds: number;
     YoutubeReferrerPolicy: boolean;
     ExperimentalChannelCategorySorting: boolean;
+    EnableWatermark: boolean;
 };
 
 export type AnalyticsSettings = {

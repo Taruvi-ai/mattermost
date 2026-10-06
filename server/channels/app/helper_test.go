@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	sq "github.com/mattermost/squirrel"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -814,6 +815,36 @@ func decodeJSON[T any](tb testing.TB, o any, result *T) *T {
 	return result
 }
 
+func (th *TestHelper) SetUserRemoteID(tb testing.TB, userID, remoteID string) *model.User {
+	tb.Helper()
+
+	query, args, err := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).
+		Update("Users").
+		Set("RemoteId", remoteID).
+		Where(sq.Eq{"Id": userID}).
+		ToSql()
+	require.NoError(tb, err)
+
+	_, err = th.App.Srv().Store().GetInternalMasterDB().Exec(query, args...)
+	require.NoError(tb, err)
+
+	th.App.InvalidateCacheForUser(userID)
+	user, appErr := th.App.GetUser(userID)
+	require.Nil(tb, appErr)
+	return user
+}
+
 func (th *TestHelper) Parallel(t *testing.T) {
 	mainHelper.Parallel(t)
+}
+
+// anonymousCallerId can be used for calls to the service that aren't tied to a specific entity.
+// These calls will not be able to access any data that has access control restrictions.
+const anonymousCallerId = ""
+
+// emptyContextWithCallerID creates a new empty request context with a caller ID for testing.
+// This is used in tests when no context is available but a caller ID is needed.
+func (th *TestHelper) emptyContextWithCallerID(callerID string) request.CTX {
+	ctx := model.WithCallerID(request.EmptyContext(th.App.Log()).Context(), callerID)
+	return request.EmptyContext(th.App.Log()).WithContext(ctx)
 }

@@ -128,8 +128,10 @@ func (h *SelfReferentialSyncHandler) HandleRequest(w http.ResponseWriter, r *htt
 							if h.OnBatchSync != nil {
 								h.OnBatchSync(batch, currentCall)
 							}
-							if len(batch) == 1 && h.OnIndividualSync != nil {
-								h.OnIndividualSync(batch[0], currentCall)
+							if h.OnIndividualSync != nil {
+								for _, uid := range batch {
+									h.OnIndividualSync(uid, currentCall)
+								}
 							}
 						}
 					}
@@ -298,9 +300,6 @@ func EnsureCleanState(t *testing.T, th *TestHelper, ss store.Store) {
 
 	rcService := th.App.Srv().GetRemoteClusterService()
 	if rcService != nil {
-		if rc, ok := rcService.(*remotecluster.Service); ok {
-			rc.SetActive(true)
-		}
 		require.Eventually(t, func() bool {
 			return rcService.Active()
 		}, 5*time.Second, 100*time.Millisecond, "Remote cluster service should be active")

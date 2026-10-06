@@ -6,6 +6,7 @@ package elasticsearch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -13,13 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/mattermost/mattermost/server/public/model"
-	"github.com/mattermost/mattermost/server/public/shared/mlog"
-	"github.com/mattermost/mattermost/server/public/shared/request"
-	"github.com/mattermost/mattermost/server/v8/channels/app/platform"
-	"github.com/mattermost/mattermost/server/v8/enterprise/elasticsearch/common"
-	"github.com/mattermost/mattermost/server/v8/platform/services/searchengine"
 
 	elastic "github.com/elastic/go-elasticsearch/v8"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/deletebyquery"
@@ -30,9 +24,17 @@ import (
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/operator"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/scriptlanguage"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/sortorder"
+
+	"github.com/mattermost/mattermost/server/public/model"
+	"github.com/mattermost/mattermost/server/public/shared/mlog"
+	"github.com/mattermost/mattermost/server/public/shared/request"
+	"github.com/mattermost/mattermost/server/v8/channels/app/platform"
+	"github.com/mattermost/mattermost/server/v8/enterprise/elasticsearch/common"
+	"github.com/mattermost/mattermost/server/v8/platform/services/searchengine"
 )
 
-const elasticsearchMaxVersion = 8
+const elasticsearchMinVersion = 8
+const elasticsearchMaxVersion = 9
 
 var (
 	purgeIndexListAllowedIndexes = []string{common.IndexBaseChannels}
@@ -42,6 +44,7 @@ type ElasticsearchInterfaceImpl struct {
 	client      *elastic.TypedClient
 	mutex       sync.RWMutex
 	ready       atomic.Int32
+	healthy     atomic.Int32 // 1 = reachable, 0 = unreachable (set by watcher)
 	version     int
 	fullVersion string
 	plugins     []string
@@ -59,6 +62,45 @@ func getJSONOrErrorStr(obj any) string {
 	return string(b)
 }
 
+// wrapElasticsearchTemplateError preserves the original Elasticsearch error while adding the nested
+// cause details that the generated client's Error method omits. Only the cause type and reason are
+// included so stack traces and arbitrary metadata from the backend do not end up in the normal
+// startup error.
+func wrapElasticsearchTemplateError(err error) error {
+	if err == nil {
+		return nil
+	}
+
+	var elasticsearchErr *types.ElasticsearchError
+	if !errors.As(err, &elasticsearchErr) || elasticsearchErr == nil {
+		return err
+	}
+
+	causes := formatElasticsearchCauses(elasticsearchErr.ErrorCause.CausedBy)
+	if causes == "" {
+		return err
+	}
+
+	return fmt.Errorf("caused by: %s: %w", causes, err)
+}
+
+func formatElasticsearchCauses(cause *types.ErrorCause) string {
+	causes := make([]string, 0)
+	for cause != nil {
+		reason := ""
+		if cause.Reason != nil {
+			reason = *cause.Reason
+		}
+		if reason == "" {
+			causes = append(causes, fmt.Sprintf("[%s]", cause.Type))
+		} else {
+			causes = append(causes, fmt.Sprintf("[%s] %s", cause.Type, reason))
+		}
+		cause = cause.CausedBy
+	}
+	return strings.Join(causes, " -> ")
+}
+
 func (*ElasticsearchInterfaceImpl) UpdateConfig(cfg *model.Config) {
 	// Not needed, it use the `Server` stored internally to get always the last version
 }
@@ -73,6 +115,18 @@ func (es *ElasticsearchInterfaceImpl) IsEnabled() bool {
 
 func (es *ElasticsearchInterfaceImpl) IsActive() bool {
 	return *es.Platform.Config().ElasticsearchSettings.EnableIndexing && es.ready.Load() == 1
+}
+
+func (es *ElasticsearchInterfaceImpl) IsHealthy() bool {
+	return es.healthy.Load() == 1
+}
+
+func (es *ElasticsearchInterfaceImpl) SetHealthy(healthy bool) {
+	if healthy {
+		es.healthy.Store(1)
+	} else {
+		es.healthy.Store(0)
+	}
 }
 
 func (es *ElasticsearchInterfaceImpl) IsIndexingEnabled() bool {
@@ -92,8 +146,8 @@ func (es *ElasticsearchInterfaceImpl) IsIndexingSync() bool {
 }
 
 // fetchServerInfo retrieves and stores the server version and plugins from the given client.
-func (es *ElasticsearchInterfaceImpl) fetchServerInfo(client *elastic.TypedClient) *model.AppError {
-	version, major, appErr := checkMaxVersion(client)
+func (es *ElasticsearchInterfaceImpl) fetchServerInfo(ctx context.Context, client *elastic.TypedClient) *model.AppError {
+	version, major, appErr := checkVersion(ctx, client, es.Platform.Log())
 	if appErr != nil {
 		return appErr
 	}
@@ -101,22 +155,25 @@ func (es *ElasticsearchInterfaceImpl) fetchServerInfo(client *elastic.TypedClien
 	es.version = major
 	es.fullVersion = version
 
-	// Since we are only retrieving plugins for the Support Packet generation, it doesn't make sense to kill the process if we get an error
-	// Instead, we will log it and move forward
-	resp, err := client.API.Cat.Plugins().Do(context.Background())
+	// Plugin information is advisory: it is used for optional analyzers and Support Packets only.
+	// CAT omits nodes with no plugins, so this inventory must not be used to prove cluster-wide absence.
+	resp, err := client.API.Cat.Plugins().Format("json").H("component").Do(ctx)
 	if err != nil {
 		es.Platform.Log().Warn("Error retrieving elasticsearch plugins", mlog.Err(err))
-	} else {
-		es.plugins = nil
-		for _, p := range resp {
-			es.plugins = append(es.plugins, *p.Component)
+		return nil
+	}
+
+	es.plugins = nil
+	for _, plugin := range resp {
+		if plugin.Component != nil && *plugin.Component != "" {
+			es.plugins = append(es.plugins, *plugin.Component)
 		}
 	}
 
 	return nil
 }
 
-func (es *ElasticsearchInterfaceImpl) Start() *model.AppError {
+func (es *ElasticsearchInterfaceImpl) Start(ctx context.Context) *model.AppError {
 	if license := es.Platform.License(); license == nil || !*license.Features.Elasticsearch || !*es.Platform.Config().ElasticsearchSettings.EnableIndexing {
 		return nil
 	}
@@ -136,13 +193,61 @@ func (es *ElasticsearchInterfaceImpl) Start() *model.AppError {
 		return appErr
 	}
 
-	if appErr = es.fetchServerInfo(es.client); appErr != nil {
+	if appErr = es.fetchServerInfo(ctx, es.client); appErr != nil {
 		return appErr
 	}
 
-	ctx := context.Background()
-
 	var err error
+	opts := []func(*types.IndexTemplateMapping){}
+	// Set up additional analyzers to use in the post index template if CJK analyzers are enabled
+	if *es.Platform.Config().ElasticsearchSettings.EnableCJKAnalyzers {
+		if common.HasAnalysisPlugin(es.plugins, "analysis-nori") {
+			opts = append(opts, common.WithNoriAnalyzer())
+		}
+		if common.HasAnalysisPlugin(es.plugins, "analysis-kuromoji") {
+			opts = append(opts, common.WithKuromojiAnalyzer())
+		}
+		if common.HasAnalysisPlugin(es.plugins, "analysis-smartcn") {
+			opts = append(opts, common.WithSmartCNAnalyzer())
+		}
+
+		if len(opts) == 0 {
+			es.Platform.Log().Warn("EnableCJKAnalyzers is set but no CJK analyzer plugins found installed. Please review elasticsearch settings.")
+		}
+	}
+
+	// Set up posts index template.
+	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBasePosts).
+		Request(common.GetPostTemplate(es.Platform.Config(), opts...)).
+		Do(ctx)
+	if err != nil {
+		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_posts_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(wrapElasticsearchTemplateError(err))
+	}
+
+	// Set up channels index template.
+	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseChannels).
+		Request(common.GetChannelTemplate(es.Platform.Config())).
+		Do(ctx)
+	if err != nil {
+		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_channels_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(wrapElasticsearchTemplateError(err))
+	}
+
+	// Set up users index template.
+	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseUsers).
+		Request(common.GetUserTemplate(es.Platform.Config())).
+		Do(ctx)
+	if err != nil {
+		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_users_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(wrapElasticsearchTemplateError(err))
+	}
+
+	// Set up files index template.
+	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseFiles).
+		Request(common.GetFileInfoTemplate(es.Platform.Config())).
+		Do(ctx)
+	if err != nil {
+		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_file_info_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(wrapElasticsearchTemplateError(err))
+	}
+
 	esSettings := es.Platform.Config().ElasticsearchSettings
 	if *esSettings.LiveIndexingBatchSize > 1 {
 		es.bulkProcessor, err = NewBulk(
@@ -154,6 +259,7 @@ func (es *ElasticsearchInterfaceImpl) Start() *model.AppError {
 			es.client,
 			time.Duration(*esSettings.RequestTimeoutSeconds)*time.Second,
 			es.Platform.Log())
+
 		if err != nil {
 			return model.NewAppError("elasticsearch.start",
 				"ent.elasticsearch.create_processor.bulk_processor_create_failed",
@@ -171,64 +277,68 @@ func (es *ElasticsearchInterfaceImpl) Start() *model.AppError {
 		es.client,
 		time.Duration(*esSettings.RequestTimeoutSeconds)*time.Second,
 		es.Platform.Log())
+
 	if err != nil {
+		if es.bulkProcessor != nil {
+			if stopErr := es.bulkProcessor.Stop(); stopErr != nil && es.Platform != nil {
+				es.Platform.Log().Warn("Error stopping bulk processor after synchronous processor creation failed", mlog.Err(stopErr))
+			}
+			es.bulkProcessor = nil
+		}
 		return model.NewAppError("elasticsearch.start",
 			"ent.elasticsearch.create_processor.sync_bulk_processor_create_failed",
 			nil, "",
 			http.StatusInternalServerError).Wrap(err)
 	}
 
-	opts := []func(*types.IndexTemplateMapping){}
-	// Set up additional analyzers to use in the post index template if CJK analyzers are enabled
-	if *es.Platform.Config().ElasticsearchSettings.EnableCJKAnalyzers {
-		if slices.Contains(es.plugins, "analysis-nori") {
-			opts = append(opts, common.WithNoriAnalyzer())
-		}
-		if slices.Contains(es.plugins, "analysis-kuromoji") {
-			opts = append(opts, common.WithKuromojiAnalyzer())
-		}
-		if slices.Contains(es.plugins, "analysis-smartcn") {
-			opts = append(opts, common.WithSmartCNAnalyzer())
-		}
-
-		if len(opts) == 0 {
-			es.Platform.Log().Warn("EnableCJKAnalyzers is set but no CJK analyzer plugins found installed. Please review elasticsearch settings.")
-		}
-	}
-
-	// Set up posts index template.
-	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBasePosts).
-		Request(common.GetPostTemplate(es.Platform.Config(), opts...)).
-		Do(ctx)
-	if err != nil {
-		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_posts_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
-	}
-
-	// Set up channels index template.
-	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseChannels).
-		Request(common.GetChannelTemplate(es.Platform.Config())).
-		Do(ctx)
-	if err != nil {
-		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_channels_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
-	}
-
-	// Set up users index template.
-	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseUsers).
-		Request(common.GetUserTemplate(es.Platform.Config())).
-		Do(ctx)
-	if err != nil {
-		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_users_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
-	}
-
-	// Set up files index template.
-	_, err = es.client.API.Indices.PutIndexTemplate(*es.Platform.Config().ElasticsearchSettings.IndexPrefix + common.IndexBaseFiles).
-		Request(common.GetFileInfoTemplate(es.Platform.Config())).
-		Do(ctx)
-	if err != nil {
-		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.create_template_file_info_if_not_exists.template_create_failed", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
-	}
-
 	es.ready.Store(1)
+	es.healthy.Store(1)
+
+	return nil
+}
+
+// snapshotClient returns the current client reference under the read lock,
+// releasing the lock before returning. This lets HealthCheck make a blocking
+// network call without holding the RLock for its full duration.
+//
+// Why this matters: the health check can block for up to 5 seconds when the
+// server is unreachable. Holding the RLock that long would block Stop() and
+// Start() (which need the write lock) — exactly when fast lifecycle
+// transitions matter most.
+//
+// Why we can't drop the mutex entirely: Stop() updates readiness and detaches
+// the client under the write lock. Without synchronization, HealthCheck could
+// race with that transition and observe an inconsistent readiness/client
+// snapshot. Using atomic.Pointer for the client would work but would be a
+// larger refactor across all methods. Copying the reference under the lock is
+// the minimal, safe fix.
+//
+// Worst case after releasing the lock: Stop() runs and nils es.client while
+// our snapshot is in-flight. The snapshot remains valid (Stop doesn't close
+// the HTTP transport), so the call completes or times out normally — the
+// next health check cycle will pick up the new state.
+func (es *ElasticsearchInterfaceImpl) snapshotClient() (*elastic.TypedClient, bool) {
+	es.mutex.RLock()
+	defer es.mutex.RUnlock()
+
+	if es.ready.Load() == 0 {
+		return nil, false
+	}
+	return es.client, true
+}
+
+func (es *ElasticsearchInterfaceImpl) HealthCheck(_ request.CTX) *model.AppError {
+	client, ok := es.snapshotClient()
+	if !ok {
+		return model.NewAppError("Elasticsearch.HealthCheck", "ent.elasticsearch.healthcheck.not_started.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if _, err := client.Cluster.Health().Do(ctx); err != nil {
+		return model.NewAppError("Elasticsearch.HealthCheck", "ent.elasticsearch.healthcheck.unreachable.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusBadGateway).Wrap(err)
+	}
 
 	return nil
 }
@@ -237,20 +347,25 @@ func (es *ElasticsearchInterfaceImpl) Stop() *model.AppError {
 	es.mutex.Lock()
 	defer es.mutex.Unlock()
 
-	if es.ready.Load() == 0 {
-		return model.NewAppError("Elasticsearch.start", "ent.elasticsearch.stop.already_stopped.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError)
-	}
+	es.ready.Store(0)
+	es.healthy.Store(0)
 
+	bulkProcessor := es.bulkProcessor
+	syncBulkProcessor := es.syncBulkProcessor
 	es.client = nil
-	// Flushing any pending requests
-	if es.bulkProcessor != nil {
-		if err := es.bulkProcessor.Stop(); err != nil {
+	es.bulkProcessor = nil
+	es.syncBulkProcessor = nil
+
+	if bulkProcessor != nil {
+		if err := bulkProcessor.Stop(); err != nil && es.Platform != nil {
 			es.Platform.Log().Warn("Error stopping bulk processor", mlog.Err(err))
 		}
-		es.bulkProcessor = nil
 	}
-
-	es.ready.Store(0)
+	if syncBulkProcessor != nil {
+		if err := syncBulkProcessor.Stop(); err != nil && es.Platform != nil {
+			es.Platform.Log().Warn("Error stopping synchronous bulk processor", mlog.Err(err))
+		}
+	}
 
 	return nil
 }
@@ -338,15 +453,15 @@ func (es *ElasticsearchInterfaceImpl) getFieldVariants(fieldName string, query s
 		return variants
 	}
 
-	if slices.Contains(es.plugins, "analysis-nori") {
+	if common.HasAnalysisPlugin(es.plugins, "analysis-nori") {
 		variants = append(variants, fieldName+".nori")
 	}
 
-	if slices.Contains(es.plugins, "analysis-kuromoji") {
+	if common.HasAnalysisPlugin(es.plugins, "analysis-kuromoji") {
 		variants = append(variants, fieldName+".kuromoji")
 	}
 
-	if slices.Contains(es.plugins, "analysis-smartcn") {
+	if common.HasAnalysisPlugin(es.plugins, "analysis-smartcn") {
 		variants = append(variants, fieldName+".smartcn")
 	}
 
@@ -1531,7 +1646,7 @@ func (es *ElasticsearchInterfaceImpl) TestConfig(rctx request.CTX, cfg *model.Co
 		return appErr
 	}
 
-	if appErr = es.fetchServerInfo(client); appErr != nil {
+	if appErr = es.fetchServerInfo(context.Background(), client); appErr != nil {
 		return appErr
 	}
 
@@ -2110,19 +2225,27 @@ func (es *ElasticsearchInterfaceImpl) DeleteFilesBatch(rctx request.CTX, endTime
 	return nil
 }
 
-func checkMaxVersion(client *elastic.TypedClient) (string, int, *model.AppError) {
-	resp, err := client.API.Core.Info().Do(context.Background())
+// checkVersion returns the version of the connected Elasticsearch server. An
+// unsupported version is logged but not treated as fatal, allowing the server to
+// start regardless.
+func checkVersion(ctx context.Context, client *elastic.TypedClient, logger mlog.LoggerIFace) (string, int, *model.AppError) {
+	resp, err := client.API.Core.Info().Do(ctx)
 	if err != nil {
-		return "", 0, model.NewAppError("Elasticsearch.checkMaxVersion", "ent.elasticsearch.start.get_server_version.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
+		return "", 0, model.NewAppError("Elasticsearch.checkVersion", "ent.elasticsearch.start.get_server_version.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
 	}
 
 	major, _, _, esErr := common.GetVersionComponents(resp.Version.Int)
 	if esErr != nil {
-		return "", 0, model.NewAppError("Elasticsearch.checkMaxVersion", "ent.elasticsearch.start.parse_server_version.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(err)
+		return "", 0, model.NewAppError("Elasticsearch.checkVersion", "ent.elasticsearch.start.parse_server_version.app_error", map[string]any{"Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusInternalServerError).Wrap(esErr)
 	}
 
-	if major > elasticsearchMaxVersion {
-		return "", 0, model.NewAppError("Elasticsearch.checkMaxVersion", "ent.elasticsearch.max_version.app_error", map[string]any{"Version": major, "MaxVersion": elasticsearchMaxVersion, "Backend": model.ElasticsearchSettingsESBackend}, "", http.StatusBadRequest)
+	if major < elasticsearchMinVersion || major > elasticsearchMaxVersion {
+		logger.Error("Unsupported Elasticsearch version. Running an unsupported version may lead to unexpected behaviour.",
+			mlog.String("version", resp.Version.Int),
+			mlog.Int("min_version", elasticsearchMinVersion),
+			mlog.Int("max_version", elasticsearchMaxVersion),
+		)
 	}
+
 	return resp.Version.Int, major, nil
 }

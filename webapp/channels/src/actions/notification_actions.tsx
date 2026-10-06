@@ -31,7 +31,8 @@ import {stripMarkdown, formatWithRenderer} from 'utils/markdown';
 import MentionableRenderer from 'utils/markdown/mentionable_renderer';
 import {DesktopNotificationSounds, ding} from 'utils/notification_sounds';
 import {showNotification} from 'utils/notifications';
-import {cjkrPattern, escapeRegex} from 'utils/text_formatting';
+import {getFocusedPopoutInfo} from 'utils/popouts/focus';
+import {cjkrPattern} from 'utils/text_formatting';
 import {isDesktopApp, isMobileApp} from 'utils/user_agent';
 import * as Utils from 'utils/utils';
 
@@ -162,7 +163,7 @@ export function sendDesktopNotification(post: Post, msgProps: NewPostMessageProp
             return {data: {status: 'not_sent', reason: 'desktop_notification_hook', data: String(hookResult)}};
         }
 
-        const result = dispatch(notifyMe(argsAfterHooks.title, argsAfterHooks.body, channel.id, teamId, argsAfterHooks.silent, argsAfterHooks.soundName, argsAfterHooks.url));
+        const result = dispatch(notifyMe(argsAfterHooks.title, argsAfterHooks.body, channel.id, teamId, argsAfterHooks.silent, argsAfterHooks.soundName, argsAfterHooks.url, post.id));
 
         //Don't add extra sounds on native desktop clients
         if (desktopSoundEnabled && !isDesktopApp() && !isMobileApp()) {
@@ -369,10 +370,10 @@ function shouldSkipNotification(
             let pattern;
             if (cjkrPattern.test(mention.key)) {
                 // In the case of CJK mention key, even if there's no delimiters (such as spaces) at both ends of a word, it is recognized as a mention key
-                pattern = new RegExp(`()(${escapeRegex(mention.key)})()`, flags);
+                pattern = new RegExp(`()(${RegExp.escape(mention.key)})()`, flags);
             } else {
                 pattern = new RegExp(
-                    `(^|\\W)(${escapeRegex(mention.key)})(\\b|_+\\b)`,
+                    `(^|\\W)(${RegExp.escape(mention.key)})(\\b|_+\\b)`,
                     flags,
                 );
             }
@@ -397,6 +398,7 @@ function shouldSkipNotification(
     // the window itself is not active
     const activeChannel = getCurrentChannel(state);
     const channelId = channel ? channel.id : null;
+    const focusedPopout = getFocusedPopoutInfo();
 
     if (state.views.browser.focused) {
         if (isCrtReply) {
@@ -406,15 +408,24 @@ function shouldSkipNotification(
         } else if (activeChannel && activeChannel.id === channelId) {
             return {status: 'not_sent', reason: 'channel_is_open', data: activeChannel?.id};
         }
+    } else if (focusedPopout) {
+        if (isCrtReply && focusedPopout.threadId === post.root_id) {
+            return {status: 'not_sent', reason: 'thread_is_open', data: post.root_id};
+        }
+        if (!isCrtReply && !focusedPopout.threadId && focusedPopout.channelId === channelId) {
+            return {status: 'not_sent', reason: 'channel_is_open', data: channelId};
+        }
     }
 
     return undefined;
 }
 
-export function notifyMe(title: string, body: string, channelId: string, teamId: string, silent: boolean, soundName: string, url: string): ActionFuncAsync<NotificationResult> {
+export function notifyMe(title: string, body: string, channelId: string, teamId: string, silent: boolean, soundName: string, url: string, postId: string): ActionFuncAsync<NotificationResult> {
     return async (dispatch) => {
         // handle notifications in desktop app
         if (isDesktopApp()) {
+            // The notification-tag leak only affects Chromium-based browser notifications,
+            // so the desktop app path does not need the opaque post id.
             const result = await DesktopApp.dispatchNotification(title, body, channelId, teamId, silent, soundName, url);
             return {data: result};
         }
@@ -423,6 +434,8 @@ export function notifyMe(title: string, body: string, channelId: string, teamId:
             const result = await dispatch(showNotification({
                 title,
                 body,
+
+                tag: postId,
                 requireInteraction: false,
                 silent,
                 onClick: () => {

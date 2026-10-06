@@ -36,10 +36,6 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password,
 	}
 
 	// Check if password is a JWT token (starts with "eyJ")
-	rctx.Logger().Info("Checking password format", 
-		mlog.Int("password_length", len(password)),
-		mlog.String("password_prefix", getPrefix(password, 10)))
-	
 	if isJWTToken(password) {
 		rctx.Logger().Info("Detected JWT token, using token verification")
 		return tp.verifyJWTToken(rctx, password)
@@ -50,14 +46,6 @@ func (tp *TaruviProvider) AuthenticateUser(rctx request.CTX, username, password,
 	return tp.authenticateWithPassword(rctx, username, password)
 }
 
-// getPrefix safely gets the first n characters of a string
-func getPrefix(s string, n int) string {
-	if len(s) < n {
-		return s
-	}
-	return s[:n]
-}
-
 // isJWTToken checks if the string is a JWT token
 func isJWTToken(s string) bool {
 	return len(s) > 10 && (s[:3] == "eyJ" || s[:4] == "eyJ0")
@@ -65,8 +53,6 @@ func isJWTToken(s string) bool {
 
 // verifyJWTToken verifies a JWT token with Taruvi
 func (tp *TaruviProvider) verifyJWTToken(rctx request.CTX, token string) (*model.TaruviAuthResponse, *model.AppError) {
-	rctx.Logger().Info("verifyJWTToken called", mlog.String("token_prefix", getPrefix(token, 20)))
-	
 	config := tp.app.Config()
 	serverURL := *config.TaruviSettings.TaruviServerURL
 	verifyEndpoint := *config.TaruviSettings.VerifyEndpoint
@@ -110,9 +96,8 @@ func (tp *TaruviProvider) verifyJWTToken(rctx request.CTX, token string) (*model
 		return nil, model.NewAppError("TaruviProvider.verifyJWTToken", "api.taruvi.verify.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi verify response", 
-		mlog.Int("status_code", resp.StatusCode),
-		mlog.String("response_body", string(body)))
+	rctx.Logger().Info("Taruvi verify response",
+		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, model.NewAppError("TaruviProvider.verifyJWTToken", "api.taruvi.verify.invalid_token", nil, fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)), http.StatusUnauthorized)
@@ -163,8 +148,6 @@ func (tp *TaruviProvider) authenticateWithPassword(rctx request.CTX, username, p
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.marshal_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Debug("Taruvi request body", mlog.String("body", string(jsonData)))
-
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.request_error", nil, "", http.StatusInternalServerError).Wrap(err)
@@ -197,9 +180,8 @@ func (tp *TaruviProvider) authenticateWithPassword(rctx request.CTX, username, p
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi response", 
-		mlog.Int("status_code", resp.StatusCode),
-		mlog.String("response_body", string(body)))
+	rctx.Logger().Info("Taruvi response",
+		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.invalid_credentials", nil, fmt.Sprintf("Status: %d", resp.StatusCode), http.StatusUnauthorized)
@@ -251,9 +233,8 @@ func (tp *TaruviProvider) getUserInfoWithToken(rctx request.CTX, token string) (
 		return nil, model.NewAppError("TaruviProvider.getUserInfoWithToken", "api.taruvi.get_user.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi get user response", 
-		mlog.Int("status_code", resp.StatusCode),
-		mlog.String("response_body", string(body)))
+	rctx.Logger().Info("Taruvi get user response",
+		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, model.NewAppError("TaruviProvider.getUserInfoWithToken", "api.taruvi.get_user.request_failed", nil, fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)), http.StatusUnauthorized)
@@ -318,8 +299,7 @@ func (tp *TaruviProvider) validateSessionToken(rctx request.CTX, sessionToken st
 	}
 
 	rctx.Logger().Info("Taruvi session validation response",
-		mlog.Int("status_code", resp.StatusCode),
-		mlog.String("response_body", string(body)))
+		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, model.NewAppError("TaruviProvider.ValidateSessionToken", "api.taruvi.session.invalid_token", nil, fmt.Sprintf("Status: %d, Body: %s", resp.StatusCode, string(body)), http.StatusUnauthorized)

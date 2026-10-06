@@ -304,13 +304,11 @@ func TestCreateUserAudit(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
+	})
 
 	email := th.GenerateTestEmail()
 	user := model.User{
@@ -341,13 +339,11 @@ func TestUserLoginAudit(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
+	})
 
 	_, err = th.Client.Logout(context.Background())
 	require.NoError(t, err)
@@ -386,13 +382,11 @@ func TestLogoutAuditAuthStatus(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
+	})
 
 	t.Run("authenticated logout has auth_status=authenticated and user_id", func(t *testing.T) {
 		require.NoError(t, logFile.Truncate(0))
@@ -1880,6 +1874,10 @@ func TestAutocompleteUsersInChannel(t *testing.T) {
 		otherUser := th.CreateUser(t)
 		th.LinkUserToTeam(t, otherUser, th.BasicTeam)
 
+		// Guest role doesn't have ViewMembers by default — grant it so the
+		// first autocomplete can actually see out-of-channel team members.
+		th.AddPermissionToRole(t, model.PermissionViewMembers.Id, model.SystemGuestRoleId)
+
 		_, _, err = th.Client.Login(context.Background(), permissionsUser.Email, permissionsUser.Password)
 		require.NoError(t, err)
 
@@ -1894,6 +1892,7 @@ func TestAutocompleteUsersInChannel(t *testing.T) {
 
 		th.RemovePermissionFromRole(t, model.PermissionViewMembers.Id, model.SystemUserRoleId)
 		th.RemovePermissionFromRole(t, model.PermissionViewMembers.Id, model.TeamUserRoleId)
+		th.RemovePermissionFromRole(t, model.PermissionViewMembers.Id, model.SystemGuestRoleId)
 
 		rusers, _, err = th.Client.AutocompleteUsersInChannel(context.Background(), teamId, channelId, "", model.UserSearchDefaultLimit, "")
 		require.NoError(t, err)
@@ -1908,6 +1907,7 @@ func TestAutocompleteUsersInChannel(t *testing.T) {
 	})
 
 	t.Run("user must have access to team id, especially when it does not match channel's team id", func(t *testing.T) {
+		th.LoginBasic(t)
 		_, _, err := th.Client.AutocompleteUsersInChannel(context.Background(), "otherTeamId", channelId, username, model.UserSearchDefaultLimit, "")
 		CheckErrorID(t, err, "api.context.permissions.app_error")
 	})
@@ -2322,6 +2322,50 @@ func TestUpdateUser(t *testing.T) {
 	})
 }
 
+func TestUpdateUserRemoteIdIgnored(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t)
+
+	t.Run("remote_id in update body is ignored for regular user", func(t *testing.T) {
+		user := th.CreateUser(t)
+		_, _, err := th.Client.Login(context.Background(), user.Email, user.Password)
+		require.NoError(t, err)
+
+		user.RemoteId = model.NewPointer("attacker-remote-id")
+		user.Nickname = "updated-nickname"
+		ruser, _, err := th.Client.UpdateUser(context.Background(), user)
+		require.NoError(t, err)
+		require.Equal(t, "updated-nickname", ruser.Nickname)
+		require.Empty(t, model.SafeDereference(ruser.RemoteId), "remote_id should remain empty")
+
+		dbUser, appErr := th.App.GetUser(user.Id)
+		require.Nil(t, appErr)
+		require.Empty(t, model.SafeDereference(dbUser.RemoteId), "remote_id should not be persisted")
+	})
+
+	t.Run("remote_id in update body is ignored for system admin", func(t *testing.T) {
+		user := th.CreateUser(t)
+
+		user.RemoteId = model.NewPointer("admin-remote-id")
+		user.Nickname = "admin-updated"
+		ruser, _, err := th.SystemAdminClient.UpdateUser(context.Background(), user)
+		require.NoError(t, err)
+		require.Equal(t, "admin-updated", ruser.Nickname)
+		require.Empty(t, model.SafeDereference(ruser.RemoteId), "remote_id should remain empty even for admin")
+	})
+
+	t.Run("existing remote_id is preserved when updating other fields", func(t *testing.T) {
+		remoteId := model.NewId()
+		user := th.SetUserRemoteID(t, th.CreateUser(t).Id, remoteId)
+
+		user.Nickname = "updated-nickname"
+		ruser, _, err := th.SystemAdminClient.UpdateUser(context.Background(), user)
+		require.NoError(t, err)
+		require.Equal(t, "updated-nickname", ruser.Nickname)
+		require.Equal(t, remoteId, model.SafeDereference(ruser.RemoteId), "existing remote_id should be preserved")
+	})
+}
+
 func TestUpdateAdminUser(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
@@ -2478,6 +2522,60 @@ func TestPatchUser(t *testing.T) {
 
 	_, _, err = th.SystemAdminClient.PatchUser(context.Background(), user.Id, patch)
 	require.NoError(t, err)
+}
+
+func TestPatchUserRemoteIdIgnored(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	t.Run("remote_id in patch is ignored for regular user", func(t *testing.T) {
+		user := th.CreateUser(t)
+		_, _, err := th.Client.Login(context.Background(), user.Email, user.Password)
+		require.NoError(t, err)
+
+		patch := &model.UserPatch{
+			RemoteId: model.NewPointer("attacker-remote-id"),
+			Nickname: model.NewPointer("new-nickname"),
+		}
+		ruser, _, err := th.Client.PatchUser(context.Background(), user.Id, patch)
+		require.NoError(t, err)
+		require.Equal(t, "new-nickname", ruser.Nickname)
+		require.Empty(t, model.SafeDereference(ruser.RemoteId), "remote_id should remain empty")
+
+		dbUser, appErr := th.App.GetUser(user.Id)
+		require.Nil(t, appErr)
+		require.Empty(t, model.SafeDereference(dbUser.RemoteId), "remote_id should not be persisted")
+	})
+
+	t.Run("remote_id in patch is ignored for system admin", func(t *testing.T) {
+		user := th.CreateUser(t)
+
+		patch := &model.UserPatch{
+			RemoteId: model.NewPointer("admin-remote-id"),
+			Nickname: model.NewPointer("admin-patched"),
+		}
+		ruser, _, err := th.SystemAdminClient.PatchUser(context.Background(), user.Id, patch)
+		require.NoError(t, err)
+		require.Equal(t, "admin-patched", ruser.Nickname)
+		require.Empty(t, model.SafeDereference(ruser.RemoteId), "remote_id should remain empty even for admin")
+
+		dbUser, appErr := th.App.GetUser(user.Id)
+		require.Nil(t, appErr)
+		require.Empty(t, model.SafeDereference(dbUser.RemoteId), "remote_id should not be persisted even for admin")
+	})
+
+	t.Run("existing remote_id is preserved when patching other fields", func(t *testing.T) {
+		remoteId := model.NewId()
+		user := th.SetUserRemoteID(t, th.CreateUser(t).Id, remoteId)
+
+		patch := &model.UserPatch{
+			Nickname: model.NewPointer("updated-nickname"),
+		}
+		ruser, _, err := th.SystemAdminClient.PatchUser(context.Background(), user.Id, patch)
+		require.NoError(t, err)
+		require.Equal(t, "updated-nickname", ruser.Nickname)
+		require.Equal(t, remoteId, model.SafeDereference(ruser.RemoteId), "existing remote_id should be preserved")
+	})
 }
 
 func TestPatchBotUser(t *testing.T) {
@@ -3036,6 +3134,84 @@ func TestUpdateUserActive(t *testing.T) {
 			require.Error(t, err)
 			CheckForbiddenStatus(t, resp)
 		})
+	})
+
+	t.Run("user manager without bot permissions cannot deactivate bot accounts", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.EnableBotAccountCreation = true
+		})
+
+		bot, botResp, err := th.SystemAdminClient.CreateBot(context.Background(), &model.Bot{
+			Username:    GenerateTestUsername(),
+			DisplayName: "Test Bot",
+			Description: "bot for permission test",
+		})
+		require.NoError(t, err)
+		CheckCreatedStatus(t, botResp)
+		defer func() {
+			appErr := th.App.PermanentDeleteBot(th.Context, bot.UserId)
+			assert.Nil(t, appErr)
+		}()
+
+		// Give BasicUser the User Manager permission to edit users, but no bot permissions.
+		th.AddPermissionToRole(t, model.PermissionSysconsoleWriteUserManagementUsers.Id, model.SystemUserRoleId)
+		defer th.RemovePermissionFromRole(t, model.PermissionSysconsoleWriteUserManagementUsers.Id, model.SystemUserRoleId)
+
+		th.LoginBasic(t)
+
+		// A User Manager without bot permissions must be blocked.
+		// Because the caller has neither PermissionReadOthersBots nor
+		// PermissionManageOthersBots, SessionHasPermissionToManageBot always
+		// returns 404 to avoid leaking the bot's existence.
+		resp, err := th.Client.UpdateUserActive(context.Background(), bot.UserId, false)
+		require.Error(t, err)
+		CheckNotFoundStatus(t, resp)
+
+		// Confirm the bot is still active.
+		botUser, _, err := th.SystemAdminClient.GetUser(context.Background(), bot.UserId, "")
+		require.NoError(t, err)
+		require.Zero(t, botUser.DeleteAt, "bot should still be active")
+	})
+
+	t.Run("user with bot management permissions can deactivate bot accounts via user active endpoint", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.EnableBotAccountCreation = true
+		})
+
+		bot, botResp, err := th.SystemAdminClient.CreateBot(context.Background(), &model.Bot{
+			Username:    GenerateTestUsername(),
+			DisplayName: "Test Bot",
+			Description: "bot for permission test",
+		})
+		require.NoError(t, err)
+		CheckCreatedStatus(t, botResp)
+		defer func() {
+			appErr := th.App.PermanentDeleteBot(th.Context, bot.UserId)
+			assert.Nil(t, appErr)
+		}()
+
+		// Assign both user-management and bot-management permissions to BasicUser.
+		th.AddPermissionToRole(t, model.PermissionSysconsoleWriteUserManagementUsers.Id, model.SystemUserRoleId)
+		defer th.RemovePermissionFromRole(t, model.PermissionSysconsoleWriteUserManagementUsers.Id, model.SystemUserRoleId)
+		th.AddPermissionToRole(t, model.PermissionManageOthersBots.Id, model.SystemUserRoleId)
+		defer th.RemovePermissionFromRole(t, model.PermissionManageOthersBots.Id, model.SystemUserRoleId)
+
+		th.LoginBasic(t)
+
+		// A user with ManageOthersBots should be allowed.
+		_, err = th.Client.UpdateUserActive(context.Background(), bot.UserId, false)
+		require.NoError(t, err)
+
+		// Confirm the bot is now inactive.
+		botUser, _, err := th.SystemAdminClient.GetUser(context.Background(), bot.UserId, "")
+		require.NoError(t, err)
+		require.True(t, botUser.DeleteAt > 0, "bot should be inactive after deactivation")
 	})
 }
 
@@ -3828,8 +4004,6 @@ func TestResetPassword(t *testing.T) {
 	err = mail.DeleteMailBox(user.Email)
 	require.NoError(t, err)
 	th.TestForAllClients(t, func(t *testing.T, client *model.Client4) {
-		_, err = client.SendPasswordResetEmail(context.Background(), user.Email)
-		require.NoError(t, err)
 		var resp *model.Response
 		resp, err = client.SendPasswordResetEmail(context.Background(), "")
 		require.Error(t, err)
@@ -3838,9 +4012,20 @@ func TestResetPassword(t *testing.T) {
 		_, err = client.SendPasswordResetEmail(context.Background(), "notreal@example.com")
 		require.NoError(t, err)
 	})
+
+	// Now generate the token we'll actually verify, after the loop above.
+	// Earlier iterations of this test called SendPasswordResetEmail for
+	// user.Email inside TestForAllClients — each subsequent call invalidates
+	// the previous token, so the oldest email in the mailbox would no longer
+	// correspond to a live DB token, and the lookup would time out.
+	err = mail.DeleteMailBox(user.Email)
+	require.NoError(t, err)
+	_, err = th.Client.SendPasswordResetEmail(context.Background(), user.Email)
+	require.NoError(t, err)
+
 	// Check if the email was send to the right email address and the recovery key match
 	var resultsMailbox mail.JSONMessageHeaderInbucket
-	err = mail.RetryInbucket(5, func() error {
+	err = mail.RetryInbucket(10, func() error {
 		resultsMailbox, err = mail.GetMailBox(user.Email)
 		return err
 	})
@@ -3858,9 +4043,14 @@ func TestResetPassword(t *testing.T) {
 		loc += 6
 		recoveryTokenString = resultsEmail.Body.Text[loc : loc+model.TokenSize]
 	}
-	recoveryToken, err := th.App.Srv().Store().Token().GetByToken(recoveryTokenString)
-	require.NoError(t, err, "Recovery token not found (%s)", recoveryTokenString)
+	var recoveryToken *model.Token
+	require.Eventually(t, func() bool {
+		var tokenErr error
+		recoveryToken, tokenErr = th.App.Srv().Store().Token().GetByToken(recoveryTokenString)
+		return tokenErr == nil
+	}, 10*time.Second, 500*time.Millisecond, "Recovery token not found (%s)", recoveryTokenString)
 
+	newPwd := model.NewTestPassword()
 	resp, err := th.Client.ResetPassword(context.Background(), recoveryToken.Token, "")
 	require.Error(t, err)
 	CheckBadRequestStatus(t, resp)
@@ -3877,16 +4067,16 @@ func TestResetPassword(t *testing.T) {
 	for range model.TokenSize {
 		code.WriteString("a")
 	}
-	resp, err = th.Client.ResetPassword(context.Background(), code.String(), "newpwd")
+	resp, err = th.Client.ResetPassword(context.Background(), code.String(), newPwd)
 	require.Error(t, err)
 	CheckBadRequestStatus(t, resp)
-	_, err = th.Client.ResetPassword(context.Background(), recoveryToken.Token, "newpwd")
+	_, err = th.Client.ResetPassword(context.Background(), recoveryToken.Token, newPwd)
 	require.NoError(t, err)
-	_, _, err = th.Client.Login(context.Background(), user.Email, "newpwd")
+	_, _, err = th.Client.Login(context.Background(), user.Email, newPwd)
 	require.NoError(t, err)
 	_, err = th.Client.Logout(context.Background())
 	require.NoError(t, err)
-	resp, err = th.Client.ResetPassword(context.Background(), recoveryToken.Token, "newpwd")
+	resp, err = th.Client.ResetPassword(context.Background(), recoveryToken.Token, newPwd)
 	require.Error(t, err)
 	CheckBadRequestStatus(t, resp)
 	authData := model.NewId()
@@ -3897,6 +4087,43 @@ func TestResetPassword(t *testing.T) {
 		require.Error(t, err)
 		CheckBadRequestStatus(t, resp)
 	})
+}
+
+func TestResetPasswordAuditDoesNotLeakToken(t *testing.T) {
+	th := Setup(t).InitBasic(t)
+
+	user := th.BasicUser
+
+	tokenExtra, err := json.Marshal(struct {
+		UserId string
+		Email  string
+	}{UserId: user.Id, Email: user.Email})
+	require.NoError(t, err)
+
+	token := model.NewToken(model.TokenTypePasswordRecovery, string(tokenExtra))
+	require.NoError(t, th.App.Srv().Store().Token().Save(token))
+	defer func() {
+		_ = th.App.Srv().Store().Token().Delete(token.Token)
+	}()
+
+	_, err = th.Client.ResetPassword(context.Background(), token.Token, model.NewTestPassword())
+	require.NoError(t, err)
+
+	audits, appErr := th.App.GetAudits(request.EmptyContext(th.TestLogger), "", 100)
+	require.Nil(t, appErr)
+
+	found := false
+	for _, audit := range audits {
+		if !strings.Contains(audit.Action, "password/reset") {
+			continue
+		}
+		found = true
+		require.NotContains(t, audit.ExtraInfo, token.Token,
+			"Full reset token should not appear in audit log ExtraInfo")
+		require.Contains(t, audit.ExtraInfo, token.Token[:5],
+			"Audit log should contain the token prefix for correlation")
+	}
+	require.True(t, found, "Expected at least one audit entry for password/reset")
 }
 
 func TestGetSessions(t *testing.T) {
@@ -4467,6 +4694,91 @@ func TestLogin(t *testing.T) {
 	})
 }
 
+func TestLoginWithGuestMagicLinkTokenRejectsDeactivatedUser(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	_, err := th.Client.Logout(context.Background())
+	require.NoError(t, err)
+
+	th.App.Srv().SetLicense(model.NewTestLicense("guest_accounts"))
+	th.App.UpdateConfig(func(cfg *model.Config) {
+		*cfg.GuestAccountsSettings.Enable = true
+		*cfg.GuestAccountsSettings.EnableGuestMagicLink = true
+	})
+
+	createGuestViaInvitation := func(t *testing.T) *model.User {
+		t.Helper()
+		email := strings.ToLower(model.NewId()) + "@example.com"
+		tokenData := map[string]string{
+			"teamId":   th.BasicTeam.Id,
+			"channels": th.BasicChannel.Id,
+			"email":    email,
+			"guest":    "true",
+			"senderId": th.BasicUser.Id,
+		}
+		invitationToken := model.NewToken(
+			model.TokenTypeGuestMagicLinkInvitation,
+			model.MapToJSON(tokenData),
+		)
+		require.NoError(t, th.App.Srv().Store().Token().Save(invitationToken))
+
+		guestUser, appErr := th.App.AuthenticateUserForGuestMagicLink(th.Context, invitationToken.Token)
+		require.Nil(t, appErr)
+		require.True(t, guestUser.IsGuest())
+		return guestUser
+	}
+
+	createLoginToken := func(t *testing.T, email string) *model.Token {
+		t.Helper()
+		loginToken := model.NewToken(
+			model.TokenTypeGuestMagicLink,
+			model.MapToJSON(map[string]string{
+				"email": email,
+			}),
+		)
+		require.NoError(t, th.App.Srv().Store().Token().Save(loginToken))
+		return loginToken
+	}
+
+	loginWithMagicLinkToken := func(t *testing.T, token string) (*http.Response, error) {
+		t.Helper()
+		props := map[string]string{
+			"magic_link_token": token,
+		}
+		return th.Client.DoAPIPost(context.Background(), "/users/login", model.MapToJSON(props))
+	}
+
+	t.Run("rejects deactivated guest", func(t *testing.T) {
+		guestUser := createGuestViaInvitation(t)
+		loginToken := createLoginToken(t, guestUser.Email)
+
+		_, appErr := th.App.UpdateActive(th.Context, guestUser, false)
+		require.Nil(t, appErr)
+
+		resp, err := loginWithMagicLinkToken(t, loginToken.Token)
+		require.Error(t, err)
+		CheckErrorID(t, err, "api.user.login.inactive.app_error")
+		CheckUnauthorizedStatus(t, model.BuildResponse(resp))
+		require.Empty(t, resp.Header.Get(model.HeaderToken))
+	})
+
+	t.Run("allows active guest", func(t *testing.T) {
+		guestUser := createGuestViaInvitation(t)
+		loginToken := createLoginToken(t, guestUser.Email)
+
+		resp, err := loginWithMagicLinkToken(t, loginToken.Token)
+		require.NoError(t, err)
+		defer closeBody(resp)
+
+		require.NotEmpty(t, resp.Header.Get(model.HeaderToken))
+
+		user, _, decodeErr := model.DecodeJSONFromResponse[*model.User](resp)
+		require.NoError(t, decodeErr)
+		assert.Equal(t, guestUser.Id, user.Id)
+	})
+}
+
 func TestLoginCookies(t *testing.T) {
 	mainHelper.Parallel(t)
 	t.Run("should return cookies with X-Requested-With header", func(t *testing.T) {
@@ -4561,13 +4873,14 @@ func TestLoginCookies(t *testing.T) {
 
 	t.Run("should return cookie with MMCLOUDURL for cloud installations when doing cws login", func(t *testing.T) {
 		token := model.NewRandomString(64)
-		os.Setenv("CWS_CLOUD_TOKEN", token)
 
 		updateConfig := func(cfg *model.Config) {
 			*cfg.ServiceSettings.SiteURL = "https://testchips.cloud.mattermost.com"
 		}
 		th := SetupAndApplyConfigBeforeLogin(t, updateConfig).InitBasic(t)
 
+		th.App.Srv().SetCWSTokenOverride(token)
+		t.Cleanup(func() { th.App.Srv().SetCWSTokenOverride("") })
 		th.App.Srv().SetLicense(model.NewTestLicense("cloud"))
 
 		form := url.Values{}
@@ -4783,6 +5096,35 @@ func TestSwitchAccount(t *testing.T) {
 			link, _, err := th.Client.SwitchAccountType(context.Background(), sr)
 			require.NoError(t, err)
 			require.Equal(t, "/login?extra=signin_change", link)
+		})
+
+		t.Run("OAuth app session cannot switch to email", func(t *testing.T) {
+			setupUserAuth(t, model.UserAuthServiceGitlab, true)
+
+			session, appErr := th.App.GetSession(th.Client.AuthToken)
+			require.Nil(t, appErr)
+			session.IsOAuth = true
+			th.App.AddSessionToCache(session)
+			t.Cleanup(func() {
+				th.Server.Platform().ClearUserSessionCacheLocal(th.BasicUser.Id)
+			})
+
+			sr := &model.SwitchRequest{
+				CurrentService: model.UserAuthServiceGitlab,
+				NewService:     model.UserAuthServiceEmail,
+				Email:          th.BasicUser.Email,
+				NewPassword:    model.NewTestPassword(),
+			}
+
+			_, resp, err := th.Client.SwitchAccountType(context.Background(), sr)
+			require.Error(t, err)
+			CheckForbiddenStatus(t, resp)
+
+			// The account must remain attached to its login provider
+			th.App.InvalidateCacheForUser(th.BasicUser.Id)
+			user, appErr := th.App.GetUser(th.BasicUser.Id)
+			require.Nil(t, appErr)
+			require.Equal(t, model.UserAuthServiceGitlab, user.AuthService)
 		})
 
 		t.Run("Disabled if EnableSignUpWithEmail is false", func(t *testing.T) {
@@ -6018,6 +6360,76 @@ func TestEnableUserAccessToken(t *testing.T) {
 	})
 }
 
+func TestRevokeUserAccessTokenDeniesOAuthSession(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) { *cfg.ServiceSettings.EnableUserAccessTokens = true })
+
+	_, appErr := th.App.UpdateUserRoles(th.Context, th.BasicUser.Id, model.SystemUserRoleId+" "+model.SystemUserAccessTokenRoleId, false)
+	require.Nil(t, appErr)
+
+	token, _, err := th.Client.CreateUserAccessToken(context.Background(), th.BasicUser.Id, "test token")
+	require.NoError(t, err)
+	assertToken(t, th, token, th.BasicUser.Id)
+
+	session, _ := th.App.GetSession(th.Client.AuthToken)
+	session.IsOAuth = true
+	th.App.AddSessionToCache(session)
+
+	resp, err := th.Client.RevokeUserAccessToken(context.Background(), token.Id)
+	require.Error(t, err)
+	CheckForbiddenStatus(t, resp)
+}
+
+func TestDisableUserAccessTokenDeniesOAuthSession(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) { *cfg.ServiceSettings.EnableUserAccessTokens = true })
+
+	_, appErr := th.App.UpdateUserRoles(th.Context, th.BasicUser.Id, model.SystemUserRoleId+" "+model.SystemUserAccessTokenRoleId, false)
+	require.Nil(t, appErr)
+
+	token, _, err := th.Client.CreateUserAccessToken(context.Background(), th.BasicUser.Id, "test token")
+	require.NoError(t, err)
+	assertToken(t, th, token, th.BasicUser.Id)
+
+	session, _ := th.App.GetSession(th.Client.AuthToken)
+	session.IsOAuth = true
+	th.App.AddSessionToCache(session)
+
+	resp, err := th.Client.DisableUserAccessToken(context.Background(), token.Id)
+	require.Error(t, err)
+	CheckForbiddenStatus(t, resp)
+}
+
+func TestEnableUserAccessTokenDeniesOAuthSession(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) { *cfg.ServiceSettings.EnableUserAccessTokens = true })
+
+	_, appErr := th.App.UpdateUserRoles(th.Context, th.BasicUser.Id, model.SystemUserRoleId+" "+model.SystemUserAccessTokenRoleId, false)
+	require.Nil(t, appErr)
+
+	token, _, err := th.Client.CreateUserAccessToken(context.Background(), th.BasicUser.Id, "test token")
+	require.NoError(t, err)
+	assertToken(t, th, token, th.BasicUser.Id)
+
+	_, err = th.Client.DisableUserAccessToken(context.Background(), token.Id)
+	require.NoError(t, err)
+	assertInvalidToken(t, th, token)
+
+	session, _ := th.App.GetSession(th.Client.AuthToken)
+	session.IsOAuth = true
+	th.App.AddSessionToCache(session)
+
+	resp, err := th.Client.EnableUserAccessToken(context.Background(), token.Id)
+	require.Error(t, err)
+	CheckForbiddenStatus(t, resp)
+}
+
 func TestUserAccessTokenInactiveUser(t *testing.T) {
 	mainHelper.Parallel(t)
 
@@ -6392,6 +6804,34 @@ func TestDemoteUserToGuest(t *testing.T) {
 
 		require.Equal(t, http.StatusOK, res.StatusCode)
 		require.NoError(t, err)
+	})
+
+	t.Run("cannot demote bot account", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicense("guest_accounts"))
+
+		prevBotCreation := *th.App.Config().ServiceSettings.EnableBotAccountCreation
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.EnableBotAccountCreation = true
+		})
+		defer th.App.UpdateConfig(func(cfg *model.Config) {
+			*cfg.ServiceSettings.EnableBotAccountCreation = prevBotCreation
+		})
+
+		createdBot, resp, err := th.SystemAdminClient.CreateBot(context.Background(), &model.Bot{
+			Username:    "botdemote" + model.NewId(),
+			DisplayName: "Demote Test Bot",
+			Description: "test",
+		})
+		require.NoError(t, err)
+		CheckCreatedStatus(t, resp)
+		defer func() {
+			appErr := th.App.PermanentDeleteBot(th.Context, createdBot.UserId)
+			require.Nil(t, appErr)
+		}()
+
+		demoteResp, err := th.SystemAdminClient.DemoteUserToGuest(context.Background(), createdBot.UserId)
+		CheckBadRequestStatus(t, demoteResp)
+		CheckErrorID(t, err, "api.user.demote_user_to_guest.bot_not_allowed.app_error")
 	})
 
 	th.TestForSystemAdminAndLocal(t, func(t *testing.T, c *model.Client4) {
@@ -6898,13 +7338,11 @@ func TestUpdatePasswordAudit(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
+	})
 
 	password := model.NewTestPassword()
 	th.LoginBasic(t)
@@ -7393,6 +7831,63 @@ func TestGetThreadsForUser(t *testing.T) {
 		require.Error(t, err)
 		CheckForbiddenStatus(t, resp)
 	})
+}
+
+func TestGetThreadsForUser_AfterTeamRemovalAndReinvite(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) {
+		*cfg.ServiceSettings.ThreadAutoFollow = true
+		*cfg.ServiceSettings.CollapsedThreads = model.CollapsedThreadsDefaultOn
+	})
+	th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuProfessional))
+
+	admin := th.BasicUser
+	victim := th.BasicUser2
+
+	privateChannel := th.CreatePrivateChannel(t)
+	th.AddUserToChannel(t, victim, privateChannel)
+
+	defer func() {
+		require.NoError(t, th.App.Srv().Store().Post().PermanentDeleteByUser(th.Context, admin.Id))
+		require.NoError(t, th.App.Srv().Store().Post().PermanentDeleteByUser(th.Context, victim.Id))
+	}()
+
+	rootPost, _, err := th.Client.CreatePost(context.Background(), &model.Post{
+		ChannelId: privateChannel.Id,
+		Message:   "private team secret",
+	})
+	require.NoError(t, err)
+
+	victimClient := th.CreateClient()
+	th.LoginBasic2WithClient(t, victimClient)
+
+	_, _, err = victimClient.CreatePost(context.Background(), &model.Post{
+		ChannelId: privateChannel.Id,
+		RootId:    rootPost.Id,
+		Message:   "victim reply",
+	})
+	require.NoError(t, err)
+
+	uss, _, err := victimClient.GetUserThreads(context.Background(), victim.Id, th.BasicTeam.Id, model.GetUserThreadsOpts{Extended: true})
+	require.NoError(t, err)
+	require.Len(t, uss.Threads, 1, "sanity: victim should see their own thread before team removal")
+
+	_, err = th.SystemAdminClient.RemoveTeamMember(context.Background(), th.BasicTeam.Id, victim.Id)
+	require.NoError(t, err)
+
+	_, _, err = th.SystemAdminClient.AddTeamMember(context.Background(), th.BasicTeam.Id, victim.Id)
+	require.NoError(t, err)
+
+	th.LoginBasic2WithClient(t, victimClient)
+
+	uss, _, err = victimClient.GetUserThreads(context.Background(), victim.Id, th.BasicTeam.Id, model.GetUserThreadsOpts{Extended: true})
+	require.NoError(t, err)
+	for _, thr := range uss.Threads {
+		require.NotEqual(t, rootPost.Id, thr.PostId, "private-channel thread must not leak to re-invited user")
+	}
+	require.Len(t, uss.Threads, 0, "re-invited user must not receive any threads from private channels they no longer belong to")
 }
 
 func TestThreadSocketEvents(t *testing.T) {
@@ -9578,6 +10073,47 @@ func TestSearchUsersWithMfaEnforced(t *testing.T) {
 			Term: "user",
 		})
 		CheckErrorID(t, err, "api.context.mfa_required.app_error")
+		CheckForbiddenStatus(t, resp)
+	})
+}
+
+func TestMeEndpointsWithMfaEnforced(t *testing.T) {
+	th := Setup(t).InitBasic(t)
+
+	th.App.Srv().SetLicense(model.NewTestLicense("mfa"))
+
+	th.App.UpdateConfig(func(cfg *model.Config) {
+		*cfg.ServiceSettings.EnableMultifactorAuthentication = true
+		*cfg.ServiceSettings.EnforceMultifactorAuthentication = true
+	})
+
+	userWithoutMFA := th.BasicUser
+	err := th.Server.Store().User().UpdateMfaActive(userWithoutMFA.Id, false)
+	require.NoError(t, err)
+
+	client := th.CreateClient()
+	_, _, loginErr := client.Login(context.Background(), userWithoutMFA.Email, userWithoutMFA.Password)
+	require.NoError(t, loginErr)
+
+	t.Run("GET /users/me remains exempt from MFA enforcement", func(t *testing.T) {
+		me, _, getErr := client.GetMe(context.Background(), "")
+		require.NoError(t, getErr)
+		require.NotNil(t, me)
+	})
+
+	t.Run("PUT /users/me is blocked when MFA is not configured", func(t *testing.T) {
+		update := userWithoutMFA.DeepCopy()
+		update.Id = model.Me
+		update.Nickname = "new nickname"
+
+		_, resp, updateErr := client.UpdateUser(context.Background(), update)
+		CheckErrorID(t, updateErr, "api.context.mfa_required.app_error")
+		CheckForbiddenStatus(t, resp)
+	})
+
+	t.Run("DELETE /users/me is blocked when MFA is not configured", func(t *testing.T) {
+		resp, deleteErr := client.DeleteUser(context.Background(), model.Me)
+		CheckErrorID(t, deleteErr, "api.context.mfa_required.app_error")
 		CheckForbiddenStatus(t, resp)
 	})
 }

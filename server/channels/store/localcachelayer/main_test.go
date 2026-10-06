@@ -54,6 +54,7 @@ func getMockStore(t *testing.T) *mocks.Store {
 	fakeRole2 := model.Role{Id: "456", Name: "role-name2"}
 	mockRolesStore := mocks.RoleStore{}
 	mockRolesStore.On("Save", &fakeRole).Return(&model.Role{}, nil)
+	mockRolesStore.On("SavePreservingUnknownPermissions", &fakeRole).Return(&model.Role{}, nil)
 	mockRolesStore.On("Delete", "123").Return(&fakeRole, nil)
 	mockRolesStore.On("GetByName", context.Background(), "role-name").Return(&fakeRole, nil)
 	mockRolesStore.On("GetByNames", []string{"role-name"}).Return([]*model.Role{&fakeRole}, nil)
@@ -107,6 +108,8 @@ func getMockStore(t *testing.T) *mocks.Store {
 	fakeChannel2 := model.Channel{Id: "channel2", Name: "channel2-name"}
 	mockChannelStore := mocks.ChannelStore{}
 	mockChannelStore.On("ClearCaches").Return()
+	mockChannelStore.On("Save", mock.IsType(&request.Context{}), &fakeChannel1, int64(0)).Return(&fakeChannel1, nil)
+	mockChannelStore.On("Update", mock.IsType(&request.Context{}), &fakeChannel1).Return(&fakeChannel1, nil)
 	mockChannelStore.On("GetMemberCount", "id", true).Return(mockCount, nil)
 	mockChannelStore.On("GetMemberCount", "id", false).Return(mockCount, nil)
 	mockChannelStore.On("GetGuestCount", "id", true).Return(mockGuestCount, nil)

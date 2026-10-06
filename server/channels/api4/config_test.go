@@ -563,13 +563,11 @@ func TestUpdateConfigDiffInAuditRecord(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
+	})
 
 	cfg, _, err := th.SystemAdminClient.GetConfig(context.Background())
 	require.NoError(t, err)
@@ -603,10 +601,11 @@ func TestUpdateConfigDiffInAuditRecord(t *testing.T) {
 }
 
 func TestGetEnvironmentConfig(t *testing.T) {
-	os.Setenv("MM_SERVICESETTINGS_SITEURL", "http://example.mattermost.com")
-	os.Setenv("MM_SERVICESETTINGS_ENABLECUSTOMEMOJI", "true")
-	defer os.Unsetenv("MM_SERVICESETTINGS_SITEURL")
-	defer os.Unsetenv("MM_SERVICESETTINGS_ENABLECUSTOMEMOJI")
+	// These MUST be t.Setenv (not UpdateConfig) because GetEnvironmentConfig
+	// returns only config values sourced from environment variables.
+	// t.Setenv prevents t.Parallel — intentionally serial.
+	t.Setenv("MM_SERVICESETTINGS_SITEURL", "http://example.mattermost.com")
+	t.Setenv("MM_SERVICESETTINGS_ENABLECUSTOMEMOJI", "true")
 
 	th := Setup(t)
 
@@ -1016,6 +1015,60 @@ func TestPatchConfig(t *testing.T) {
 		storedCfg := th.App.Config()
 		require.Contains(t, storedCfg.PluginSettings.Plugins, "com.example.oauth-plugin")
 		assert.Equal(t, "test-client-id", storedCfg.PluginSettings.Plugins["com.example.oauth-plugin"]["clientid"])
+	})
+
+	t.Run("should preserve plugin configs absent from patch due to partial sync", func(t *testing.T) {
+		// Start with multiple plugins configured.
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			cfg.PluginSettings.Enable = model.NewPointer(true)
+			cfg.PluginSettings.Plugins = map[string]map[string]any{
+				"com.example.plugin-a": {"token": "token-a"},
+				"com.example.plugin-b": {"token": "token-b"},
+			}
+		})
+
+		// simulate a client receives a partial sanitized config with only plugin-a, and PATCHes it back. Plugin-b should survive.
+		patch := &model.Config{}
+		patch.PluginSettings.Enable = model.NewPointer(true)
+		patch.PluginSettings.Plugins = map[string]map[string]any{
+			"com.example.plugin-a": {"token": "token-a-updated"},
+		}
+		_, _, err := th.SystemAdminClient.PatchConfig(context.Background(), patch)
+		require.NoError(t, err)
+
+		// All plugin configs must survive; only the synced plugin was in the patch.
+		storedCfg := th.App.Config()
+		require.Contains(t, storedCfg.PluginSettings.Plugins, "com.example.plugin-a")
+		require.Contains(t, storedCfg.PluginSettings.Plugins, "com.example.plugin-b")
+		assert.Equal(t, "token-a-updated", storedCfg.PluginSettings.Plugins["com.example.plugin-a"]["token"])
+		assert.Equal(t, "token-b", storedCfg.PluginSettings.Plugins["com.example.plugin-b"]["token"])
+	})
+
+	t.Run("should preserve plugin configs absent from patch due to partial sync while using local client", func(t *testing.T) {
+		// Start with multiple plugins configured.
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			cfg.PluginSettings.Enable = model.NewPointer(true)
+			cfg.PluginSettings.Plugins = map[string]map[string]any{
+				"com.example.plugin-a": {"token": "token-a"},
+				"com.example.plugin-b": {"token": "token-b"},
+			}
+		})
+
+		// Simulate a client receives a partial sanitized config with only plugin-a, and PATCHes it back. Plugin-b should survive.
+		patch := &model.Config{}
+		patch.PluginSettings.Enable = model.NewPointer(true)
+		patch.PluginSettings.Plugins = map[string]map[string]any{
+			"com.example.plugin-a": {"token": "token-a-updated"},
+		}
+		_, _, err := th.LocalClient.PatchConfig(context.Background(), patch)
+		require.NoError(t, err)
+
+		// All plugin configs must survive; only the synced plugin was in the patch.
+		storedCfg := th.App.Config()
+		require.Contains(t, storedCfg.PluginSettings.Plugins, "com.example.plugin-a")
+		require.Contains(t, storedCfg.PluginSettings.Plugins, "com.example.plugin-b")
+		assert.Equal(t, "token-a-updated", storedCfg.PluginSettings.Plugins["com.example.plugin-a"]["token"])
+		assert.Equal(t, "token-b", storedCfg.PluginSettings.Plugins["com.example.plugin-b"]["token"])
 	})
 }
 

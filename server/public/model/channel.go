@@ -103,6 +103,7 @@ type Channel struct {
 	PolicyEnforced      bool               `json:"policy_enforced"`
 	PolicyIsActive      bool               `json:"policy_is_active"`
 	DefaultCategoryName string             `json:"default_category_name"`
+	ManagedCategoryName string             `json:"managed_category_name"`
 }
 
 func (o *Channel) Auditable() map[string]any {
@@ -146,13 +147,14 @@ type ChannelsWithCount struct {
 }
 
 type ChannelPatch struct {
-	DisplayName      *string            `json:"display_name"`
-	Name             *string            `json:"name"`
-	Header           *string            `json:"header"`
-	Purpose          *string            `json:"purpose"`
-	GroupConstrained *bool              `json:"group_constrained"`
-	BannerInfo       *ChannelBannerInfo `json:"banner_info"`
-	AutoTranslation  *bool              `json:"autotranslation"`
+	DisplayName         *string            `json:"display_name"`
+	Name                *string            `json:"name"`
+	Header              *string            `json:"header"`
+	Purpose             *string            `json:"purpose"`
+	GroupConstrained    *bool              `json:"group_constrained"`
+	BannerInfo          *ChannelBannerInfo `json:"banner_info"`
+	AutoTranslation     *bool              `json:"autotranslation"`
+	ManagedCategoryName *string            `json:"managed_category_name"`
 }
 
 func (c *ChannelPatch) Auditable() map[string]any {
@@ -330,6 +332,10 @@ func (o *Channel) IsValid() *AppError {
 		}
 	}
 
+	if o.IsGroupConstrained() && !o.SupportsGroupSync() {
+		return NewAppError("Channel.IsValid", "model.channel.is_valid.group_constrained.app_error", nil, "id="+o.Id, http.StatusBadRequest)
+	}
+
 	return nil
 }
 
@@ -355,6 +361,11 @@ func (o *Channel) PreUpdate() {
 
 func (o *Channel) IsGroupOrDirect() bool {
 	return o.Type == ChannelTypeDirect || o.Type == ChannelTypeGroup
+}
+
+// SupportsGroupSync reports whether group_constrained is meaningful for the channel type.
+func (o *Channel) SupportsGroupSync() bool {
+	return o.Type == ChannelTypeOpen || o.Type == ChannelTypePrivate
 }
 
 func (o *Channel) IsOpen() bool {

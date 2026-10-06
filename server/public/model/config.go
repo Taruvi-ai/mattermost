@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blang/semver/v4"
+	"github.com/Masterminds/semver/v3"
 	"github.com/mattermost/ldap"
 	"github.com/pkg/errors"
 
@@ -131,7 +131,7 @@ const (
 	TeamSettingsDefaultCustomDescriptionText = ""
 	TeamSettingsDefaultUserStatusAwayTimeout = 300
 
-	SqlSettingsDefaultDataSource = "postgres://mmuser:mostest@localhost/mattermost_test?sslmode=disable&connect_timeout=10&binary_parameters=yes"
+	SqlSettingsDefaultDataSource = "postgres://mmuser:mostest_password@localhost/mattermost_test?sslmode=disable&connect_timeout=10&binary_parameters=yes"
 
 	FileSettingsDefaultDirectory                   = "./data/"
 	FileSettingsDefaultS3UploadPartSizeBytes       = 5 * 1024 * 1024   // 5MB
@@ -143,12 +143,12 @@ const (
 	ExportSettingsDefaultDirectory     = "./export"
 	ExportSettingsDefaultRetentionDays = 30
 
-	TaruviSettingsDefaultServerURL          = "http://localhost:8000"
-	TaruviSettingsDefaultAuthEndpoint       = "/api/_allauth/browser/v1/auth/login"
-	TaruviSettingsDefaultUserEndpoint       = "/api/users/me/"
-	TaruviSettingsDefaultVerifyEndpoint     = "/api/auth/jwt/token/verify/"
-	TaruviSettingsDefaultSessionEndpoint    = "/_allauth/app/v1/auth/session"
-	TaruviSettingsDefaultConnectionTimeout  = 10
+	TaruviSettingsDefaultServerURL         = "http://localhost:8000"
+	TaruviSettingsDefaultAuthEndpoint      = "/api/_allauth/browser/v1/auth/login"
+	TaruviSettingsDefaultUserEndpoint      = "/api/users/me/"
+	TaruviSettingsDefaultVerifyEndpoint    = "/api/auth/jwt/token/verify/"
+	TaruviSettingsDefaultSessionEndpoint   = "/_allauth/app/v1/auth/session"
+	TaruviSettingsDefaultConnectionTimeout = 10
 
 	EmailSettingsDefaultFeedbackOrganization = ""
 
@@ -1225,6 +1225,7 @@ type ExperimentalSettings struct {
 	UsersStatusAndProfileFetchingPollIntervalMilliseconds *int64 `access:"experimental_features"`
 	YoutubeReferrerPolicy                                 *bool  `access:"experimental_features"`
 	ExperimentalChannelCategorySorting                    *bool  `access:"experimental_features"`
+	EnableWatermark                                       *bool  `access:"experimental_features"`
 }
 
 func (s *ExperimentalSettings) SetDefaults() {
@@ -1274,6 +1275,10 @@ func (s *ExperimentalSettings) SetDefaults() {
 
 	if s.ExperimentalChannelCategorySorting == nil {
 		s.ExperimentalChannelCategorySorting = NewPointer(false)
+	}
+
+	if s.EnableWatermark == nil {
+		s.EnableWatermark = NewPointer(false)
 	}
 }
 
@@ -1498,6 +1503,7 @@ type SqlSettings struct {
 	Trace                             *bool                 `access:"environment_database,write_restrictable,cloud_restrictable"`
 	AtRestEncryptKey                  *string               `access:"environment_database,write_restrictable,cloud_restrictable"` // telemetry: none
 	QueryTimeout                      *int                  `access:"environment_database,write_restrictable,cloud_restrictable"`
+	AnalyticsQueryTimeout             *int                  `access:"environment_database,write_restrictable,cloud_restrictable"`
 	DisableDatabaseSearch             *bool                 `access:"environment_database,write_restrictable,cloud_restrictable"`
 	MigrationsStatementTimeoutSeconds *int                  `access:"environment_database,write_restrictable,cloud_restrictable"`
 	ReplicaLagSettings                []*ReplicaLagSettings `access:"environment_database,write_restrictable,cloud_restrictable"` // telemetry: none
@@ -1553,6 +1559,10 @@ func (s *SqlSettings) SetDefaults(isUpdate bool) {
 
 	if s.QueryTimeout == nil {
 		s.QueryTimeout = NewPointer(30)
+	}
+
+	if s.AnalyticsQueryTimeout == nil {
+		s.AnalyticsQueryTimeout = NewPointer(300)
 	}
 
 	if s.DisableDatabaseSearch == nil {
@@ -1781,6 +1791,7 @@ type FileSettings struct {
 	Directory                          *string `access:"environment_file_storage,write_restrictable,cloud_restrictable"`
 	EnablePublicLink                   *bool   `access:"site_public_links,cloud_restrictable"`
 	ExtractContent                     *bool   `access:"environment_file_storage,write_restrictable"`
+	ExtractContentTimeout              *int    `access:"environment_file_storage,write_restrictable"` // In seconds. 0 disables the timeout.
 	ArchiveRecursion                   *bool   `access:"environment_file_storage,write_restrictable"`
 	PublicLinkSalt                     *string `access:"site_public_links,cloud_restrictable"`                           // telemetry: none
 	InitialFont                        *string `access:"environment_file_storage,cloud_restrictable"`                    // telemetry: none
@@ -1856,6 +1867,10 @@ func (s *FileSettings) SetDefaults(isUpdate bool) {
 
 	if s.ExtractContent == nil {
 		s.ExtractContent = NewPointer(true)
+	}
+
+	if s.ExtractContentTimeout == nil {
+		s.ExtractContentTimeout = NewPointer(10)
 	}
 
 	if s.ArchiveRecursion == nil {
@@ -3173,6 +3188,19 @@ func (s *NativeAppSettings) SetDefaults() {
 	}
 }
 
+func (s *NativeAppSettings) AreDownloadLinksValid() *AppError {
+	for _, link := range []*string{s.AppDownloadLink, s.AndroidAppDownloadLink, s.IosAppDownloadLink} {
+		if link == nil || *link == "" {
+			continue
+		}
+		u, err := url.ParseRequestURI(*link)
+		if err != nil || u.Scheme == "" || u.Hostname() == "" {
+			return NewAppError("NativeAppSettings.AreDownloadLinksValid", "model.config.is_valid.native_app_settings.download_link.app_error", nil, "", http.StatusBadRequest)
+		}
+	}
+	return nil
+}
+
 type ElasticsearchSettings struct {
 	ConnectionURL                               *string `access:"environment_elasticsearch,write_restrictable,cloud_restrictable"`
 	Backend                                     *string `access:"environment_elasticsearch,write_restrictable,cloud_restrictable"`
@@ -4045,8 +4073,8 @@ type Config struct {
 	ComplianceSettings          ComplianceSettings
 	LocalizationSettings        LocalizationSettings
 	SamlSettings                SamlSettings
-	KeycloakSettings              KeycloakSettings
-	TaruviSettings                TaruviSettings
+	KeycloakSettings            KeycloakSettings
+	TaruviSettings              TaruviSettings
 	NativeAppSettings           NativeAppSettings
 	IntuneSettings              IntuneSettings
 	CacheSettings               CacheSettings
@@ -4248,6 +4276,10 @@ func (o *Config) IsValid() *AppError {
 		return appErr
 	}
 
+	if appErr := o.NativeAppSettings.AreDownloadLinksValid(); appErr != nil {
+		return appErr
+	}
+
 	// Cross-reference validation: IntuneSettings requires either Office365 or SAML to be enabled
 	if o.IntuneSettings.Enable != nil && *o.IntuneSettings.Enable {
 		if o.IntuneSettings.AuthService != nil && *o.IntuneSettings.AuthService != "" {
@@ -4428,6 +4460,10 @@ func (s *SqlSettings) isValid() *AppError {
 		return NewAppError("Config.IsValid", "model.config.is_valid.sql_query_timeout.app_error", nil, "", http.StatusBadRequest)
 	}
 
+	if *s.AnalyticsQueryTimeout <= 0 {
+		return NewAppError("Config.IsValid", "model.config.is_valid.sql_analytics_query_timeout.app_error", nil, "", http.StatusBadRequest)
+	}
+
 	if *s.DataSource == "" {
 		return NewAppError("Config.IsValid", "model.config.is_valid.sql_data_src.app_error", nil, "", http.StatusBadRequest)
 	}
@@ -4442,6 +4478,10 @@ func (s *SqlSettings) isValid() *AppError {
 func (s *FileSettings) isValid() *AppError {
 	if *s.MaxFileSize <= 0 {
 		return NewAppError("Config.IsValid", "model.config.is_valid.max_file_size.app_error", nil, "", http.StatusBadRequest)
+	}
+
+	if *s.ExtractContentTimeout < 0 {
+		return NewAppError("Config.IsValid", "model.config.is_valid.extract_content_timeout.app_error", nil, "", http.StatusBadRequest)
 	}
 
 	if !(*s.DriverName == ImageDriverLocal || *s.DriverName == ImageDriverS3) {
@@ -4735,7 +4775,7 @@ func (s *ServiceSettings) isValid() *AppError {
 	}
 
 	if *s.MinimumDesktopAppVersion != "" {
-		if _, err := semver.Parse(*s.MinimumDesktopAppVersion); err != nil {
+		if _, err := semver.StrictNewVersion(*s.MinimumDesktopAppVersion); err != nil {
 			return NewAppError("Config.IsValid", "model.config.is_valid.minimum_desktop_app_version.app_error", nil, "", http.StatusBadRequest).Wrap(err)
 		}
 	}
@@ -5139,10 +5179,6 @@ func (o *Config) Sanitize(pluginManifests []*Manifest, opts *SanitizeOptions) {
 
 	if o.ElasticsearchSettings.Password != nil {
 		*o.ElasticsearchSettings.Password = FakeSetting
-	}
-
-	if o.ElasticsearchSettings.ClientKey != nil && *o.ElasticsearchSettings.ClientKey != "" {
-		*o.ElasticsearchSettings.ClientKey = FakeSetting
 	}
 
 	for i := range o.SqlSettings.DataSourceReplicas {

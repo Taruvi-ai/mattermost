@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gorilla/mux"
 
@@ -56,6 +57,20 @@ func (api *API) InitPost() {
 	api.BaseRoutes.Post.Handle("/burn", api.APISessionRequired(burnPost)).Methods(http.MethodDelete)
 }
 
+// rejectOversizedMessage sets c.Err and returns true if message is longer than the configured
+// MaxPostSize. It mirrors the check in model.Post.IsValid, but runs before any markdown processing
+// (e.g. PostWithProxyRemovedFromImageURLs) is applied to the raw message, so that oversized
+// messages are rejected before that processing pays for them.
+func rejectOversizedMessage(c *Context, where string, message string) bool {
+	maxPostSize := c.App.MaxPostSize()
+	if length := utf8.RuneCountInString(message); length > maxPostSize {
+		c.Err = model.NewAppError(where, "model.post.is_valid.message_length.app_error",
+			map[string]any{"Length": length, "MaxLength": maxPostSize}, "", http.StatusBadRequest)
+		return true
+	}
+	return false
+}
+
 func createPostChecks(where string, c *Context, post *model.Post) {
 	// ***************************************************************
 	// NOTE - if you make any change here, please make sure to apply the
@@ -65,6 +80,11 @@ func createPostChecks(where string, c *Context, post *model.Post) {
 
 	userCreatePostPermissionCheckWithContext(c, post.ChannelId)
 	if c.Err != nil {
+		return
+	}
+
+	if model.IsSystemMessagePostType(post.Type) {
+		c.SetInvalidParam("post.type")
 		return
 	}
 
@@ -81,6 +101,11 @@ func createPostChecks(where string, c *Context, post *model.Post) {
 	}
 
 	postPriorityCheckWithContext(where, c, post.GetPriority(), post.RootId)
+	if c.Err != nil {
+		return
+	}
+
+	postCardTypeCheckWithContext(where, c, post.Type)
 	if c.Err != nil {
 		return
 	}
@@ -108,6 +133,10 @@ func createPost(c *Context, w http.ResponseWriter, r *http.Request) {
 
 	createPostChecks("Api4.createPost", c, &post)
 	if c.Err != nil {
+		return
+	}
+
+	if rejectOversizedMessage(c, "Api4.createPost", post.Message) {
 		return
 	}
 
@@ -679,7 +708,9 @@ func getEditHistoryForPost(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if c.AppContext.Session().UserId != originalPost.UserId {
+	if originalPost.Type == model.PostTypeCard && c.App.Config().FeatureFlags.IntegratedBoards {
+		// Cards: collaborative model — any channel member with edit_post can view edit history
+	} else if c.AppContext.Session().UserId != originalPost.UserId {
 		c.SetPermissionError(model.PermissionEditPost)
 		return
 	}
@@ -736,12 +767,19 @@ func deletePost(c *Context, w http.ResponseWriter, _ *http.Request) {
 	auditRec.AddEventPriorState(post)
 	auditRec.AddEventObjectType("post")
 
-	if c.AppContext.Session().UserId == post.UserId {
+	switch {
+	case c.AppContext.Session().UserId == post.UserId:
 		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), post.ChannelId, model.PermissionDeletePost); !ok {
 			c.SetPermissionError(model.PermissionDeletePost)
 			return
 		}
-	} else {
+	case post.Type == model.PostTypeCard && c.App.Config().FeatureFlags.IntegratedBoards:
+		// Cards: collaborative model — any user with delete_post can delete any card
+		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), post.ChannelId, model.PermissionDeletePost); !ok {
+			c.SetPermissionError(model.PermissionDeletePost)
+			return
+		}
+	default:
 		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), post.ChannelId, model.PermissionDeleteOthersPosts); !ok {
 			c.SetPermissionError(model.PermissionDeleteOthersPosts)
 			return
@@ -1090,7 +1128,20 @@ func updatePost(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if c.AppContext.Session().UserId != originalPost.UserId {
+	// Check edit_file_attachment permission if file IDs are being changed (files added or removed)
+	checkEditFileAttachmentPermission(c, post.FileIds, originalPost)
+	if c.Err != nil {
+		return
+	}
+
+	if rejectOversizedMessage(c, "Api4.updatePost", post.Message) {
+		return
+	}
+
+	if originalPost.Type == model.PostTypeCard && c.App.Config().FeatureFlags.IntegratedBoards {
+		// Cards: collaborative model — skip ownership check
+		// PermissionEditPost already checked above
+	} else if c.AppContext.Session().UserId != originalPost.UserId {
 		// We don't need to check the member here, since we already checked it above
 		if ok, _ := c.App.SessionHasPermissionToChannel(c.AppContext, *c.AppContext.Session(), originalPost.ChannelId, model.PermissionEditOthersPosts); !ok {
 			c.SetPermissionError(model.PermissionEditOthersPosts)
@@ -1153,6 +1204,10 @@ func patchPost(c *Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if post.Message != nil && rejectOversizedMessage(c, "Api4.patchPost", *post.Message) {
+		return
+	}
+
 	originalPost, err := c.App.GetSinglePost(c.AppContext, c.Params.PostId, false)
 	if err != nil {
 		c.SetPermissionError(model.PermissionEditPost)
@@ -1161,6 +1216,11 @@ func patchPost(c *Context, w http.ResponseWriter, r *http.Request) {
 
 	if post.FileIds != nil {
 		checkUploadFilePermissionForNewFiles(c, *post.FileIds, originalPost)
+		if c.Err != nil {
+			return
+		}
+
+		checkEditFileAttachmentPermission(c, *post.FileIds, originalPost)
 		if c.Err != nil {
 			return
 		}
@@ -1194,10 +1254,13 @@ func postPatchChecks(c *Context, auditRec *model.AuditRecord, patch *model.PostP
 	auditRec.AddEventObjectType("post")
 
 	var permission *model.Permission
-
-	if c.AppContext.Session().UserId == originalPost.UserId {
+	switch {
+	case c.AppContext.Session().UserId == originalPost.UserId:
 		permission = model.PermissionEditPost
-	} else {
+	case originalPost.Type == model.PostTypeCard && c.App.Config().FeatureFlags.IntegratedBoards:
+		// Cards: collaborative model — any member can edit any card
+		permission = model.PermissionEditPost
+	default:
 		permission = model.PermissionEditOthersPosts
 	}
 
@@ -1525,6 +1588,20 @@ func getFileInfosForPost(c *Context, w http.ResponseWriter, r *http.Request) {
 	if includeDeleted && !c.App.SessionHasPermissionTo(*c.AppContext.Session(), model.PermissionManageSystem) {
 		c.SetPermissionError(model.PermissionManageSystem)
 		return
+	}
+
+	// Block file metadata (including mini_preview) for users denied download access.
+	// Skipped when the PermissionPolicies feature flag is off to avoid an unnecessary DB fetch.
+	if c.App.Config().FeatureFlags.PermissionPolicies {
+		filePost, filePostErr := c.App.GetSinglePost(c.AppContext, c.Params.PostId, includeDeleted)
+		if filePostErr != nil {
+			c.Err = filePostErr
+			return
+		}
+		if !c.App.HasPermissionToFileAction(c.AppContext, c.AppContext.Session().UserId, c.AppContext.Session().Roles, filePost.ChannelId, model.AccessControlPolicyActionDownloadFileAttachment) {
+			c.Err = model.NewAppError("getFileInfosForPost", "api.file.get_file.abac_denied.app_error", nil, "", http.StatusForbidden)
+			return
+		}
 	}
 
 	infos, appErr := c.App.GetFileInfosForPostWithMigration(c.AppContext, c.Params.PostId, includeDeleted)

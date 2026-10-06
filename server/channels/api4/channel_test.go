@@ -333,6 +333,86 @@ func TestCreateChannel(t *testing.T) {
 	})
 }
 
+func TestCreateChannelManagedCategory(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := SetupConfig(t, func(cfg *model.Config) {
+		cfg.FeatureFlags.ManagedChannelCategories = true
+	}).InitBasic(t)
+	th.ConfigStore.SetReadOnlyFF(false)
+	t.Cleanup(func() {
+		th.ConfigStore.SetReadOnlyFF(true)
+	})
+	client := th.Client
+	team := th.BasicTeam
+
+	t.Run("should ignore managed category when no enterprise license", func(t *testing.T) {
+		appErr := th.App.Srv().RemoveLicense()
+		require.Nil(t, appErr)
+
+		channel := &model.Channel{
+			DisplayName:         "Managed No License",
+			Name:                GenerateTestChannelName(),
+			Type:                model.ChannelTypeOpen,
+			TeamId:              team.Id,
+			ManagedCategoryName: "Operations",
+		}
+		created, resp, err := client.CreateChannel(context.Background(), channel)
+		require.NoError(t, err)
+		CheckCreatedStatus(t, resp)
+		assert.Empty(t, created.ManagedCategoryName, "managed category should be cleared without license")
+	})
+
+	t.Run("should ignore managed category when feature is disabled", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = false })
+		defer func() {
+			appErr := th.App.Srv().RemoveLicense()
+			require.Nil(t, appErr)
+		}()
+
+		channel := &model.Channel{
+			DisplayName:         "Managed Disabled Feature",
+			Name:                GenerateTestChannelName(),
+			Type:                model.ChannelTypeOpen,
+			TeamId:              team.Id,
+			ManagedCategoryName: "Operations",
+		}
+		created, resp, err := client.CreateChannel(context.Background(), channel)
+		require.NoError(t, err)
+		CheckCreatedStatus(t, resp)
+		assert.Empty(t, created.ManagedCategoryName, "managed category should be cleared when feature is disabled")
+	})
+
+	t.Run("should set managed category when feature is enabled with license", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = true })
+		defer func() {
+			appErr := th.App.Srv().RemoveLicense()
+			require.Nil(t, appErr)
+		}()
+
+		channel := &model.Channel{
+			DisplayName:         "Managed Enabled",
+			Name:                GenerateTestChannelName(),
+			Type:                model.ChannelTypeOpen,
+			TeamId:              team.Id,
+			ManagedCategoryName: "Operations",
+		}
+		created, resp, err := client.CreateChannel(context.Background(), channel)
+		require.NoError(t, err)
+		CheckCreatedStatus(t, resp)
+		assert.Equal(t, "Operations", created.ManagedCategoryName)
+
+		resp2, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", team.Id), "")
+		require.NoError(t, err)
+		defer resp2.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp2.Body).Decode(&mappings))
+		assert.Equal(t, "Operations", mappings[created.Id])
+	})
+}
+
 func TestUpdateChannel(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
@@ -915,6 +995,36 @@ func TestPatchChannel(t *testing.T) {
 		}
 		*directChannelPatch3.Purpose = "test purpose"
 		_, resp, err = client.PatchChannel(context.Background(), directChannel.Id, directChannelPatch3)
+		require.Error(t, err)
+		CheckBadRequestStatus(t, resp)
+	})
+
+	t.Run("Should block setting group_constrained on group and direct messages", func(t *testing.T) {
+		user1 := th.CreateUser(t)
+		user2 := th.CreateUser(t)
+		user3 := th.CreateUser(t)
+
+		_, err := client.Logout(context.Background())
+		require.NoError(t, err)
+		_, _, err = client.Login(context.Background(), user1.Email, user1.Password)
+		require.NoError(t, err)
+
+		groupChannel, _, err := client.CreateGroupChannel(context.Background(), []string{user1.Id, user2.Id, user3.Id})
+		require.NoError(t, err)
+
+		patch := &model.ChannelPatch{GroupConstrained: model.NewPointer(true)}
+		_, resp, err := client.PatchChannel(context.Background(), groupChannel.Id, patch)
+		require.Error(t, err)
+		CheckBadRequestStatus(t, resp)
+
+		stats, _, err := client.GetChannelStats(context.Background(), groupChannel.Id, "", false)
+		require.NoError(t, err)
+		require.Equal(t, int64(3), stats.MemberCount)
+
+		directChannel, _, err := client.CreateDirectChannel(context.Background(), user1.Id, user2.Id)
+		require.NoError(t, err)
+
+		_, resp, err = client.PatchChannel(context.Background(), directChannel.Id, patch)
 		require.Error(t, err)
 		CheckBadRequestStatus(t, resp)
 	})
@@ -2128,6 +2238,28 @@ func TestGetChannel(t *testing.T) {
 		require.Error(t, err)
 		CheckForbiddenStatus(t, resp)
 	})
+
+	t.Run("Content reviewer should not be able to get a DM or GM channel", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterpriseAdvanced))
+		appErr := setBasicCommonReviewerConfig(th)
+		require.Nil(t, appErr)
+
+		contentReviewClient := th.CreateClient()
+		_, _, err := contentReviewClient.Login(context.Background(), th.BasicUser.Email, th.BasicUser.Password)
+		require.NoError(t, err)
+
+		dmPost := createDmPost(t, th, contentReviewClient)
+		_, resp, err := contentReviewClient.GetChannelAsContentReviewer(context.Background(), dmPost.ChannelId, "", dmPost.Id)
+		require.Error(t, err)
+		CheckBadRequestStatus(t, resp)
+		CheckErrorID(t, err, "api.data_spillage.error.invalid_channel_type")
+
+		gmPost := createGmPost(t, th, contentReviewClient)
+		_, resp, err = contentReviewClient.GetChannelAsContentReviewer(context.Background(), gmPost.ChannelId, "", gmPost.Id)
+		require.Error(t, err)
+		CheckBadRequestStatus(t, resp)
+		CheckErrorID(t, err, "api.data_spillage.error.invalid_channel_type")
+	})
 }
 
 func TestGetDeletedChannelsForTeam(t *testing.T) {
@@ -3200,6 +3332,74 @@ func TestSearchAllChannels(t *testing.T) {
 			require.Equal(t, "", channel.CreatorId)
 			require.Equal(t, "", channel.Name)
 		}
+	})
+}
+
+func TestSearchAllChannelsNonSysConsoleFiltered(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	// Create a team admin user
+	teamAdmin := th.CreateUser(t)
+	th.LinkUserToTeam(t, teamAdmin, th.BasicTeam)
+	th.UpdateUserToTeamAdmin(t, teamAdmin, th.BasicTeam)
+	teamAdminClient := th.CreateClient()
+	_, _, err := teamAdminClient.Login(context.Background(), teamAdmin.Email, teamAdmin.Password)
+	require.NoError(t, err)
+
+	// Create >50 public channels so the 50-result cap would normally cut off private channels
+	pubCount := 0
+	for range 55 {
+		ch, _, chErr := th.SystemAdminClient.CreateChannel(context.Background(), &model.Channel{
+			TeamId:      th.BasicTeam.Id,
+			DisplayName: fmt.Sprintf("Public Cap Channel %03d", pubCount),
+			Name:        model.NewId()[:20],
+			Type:        model.ChannelTypeOpen,
+		})
+		require.NoError(t, chErr)
+		_, _, err = th.SystemAdminClient.AddChannelMember(context.Background(), ch.Id, teamAdmin.Id)
+		require.NoError(t, err)
+		pubCount++
+	}
+
+	// Create private channels the team admin is a member of
+	private1, _, err := th.SystemAdminClient.CreateChannel(context.Background(), &model.Channel{
+		TeamId:      th.BasicTeam.Id,
+		DisplayName: "Private Filter Test 1",
+		Name:        model.NewId()[:20],
+		Type:        model.ChannelTypePrivate,
+	})
+	require.NoError(t, err)
+	_, _, err = th.SystemAdminClient.AddChannelMember(context.Background(), private1.Id, teamAdmin.Id)
+	require.NoError(t, err)
+
+	private2, _, err := th.SystemAdminClient.CreateChannel(context.Background(), &model.Channel{
+		TeamId:      th.BasicTeam.Id,
+		DisplayName: "Private Filter Test 2",
+		Name:        model.NewId()[:20],
+		Type:        model.ChannelTypePrivate,
+	})
+	require.NoError(t, err)
+	_, _, err = th.SystemAdminClient.AddChannelMember(context.Background(), private2.Id, teamAdmin.Id)
+	require.NoError(t, err)
+
+	t.Run("private filter returns private member channels despite >50 public channels", func(t *testing.T) {
+		channels, _, err := teamAdminClient.SearchAllChannelsForUserWithOpts(
+			context.Background(),
+			&model.ChannelSearch{
+				TeamIds: []string{th.BasicTeam.Id},
+				Private: true,
+			},
+		)
+		require.NoError(t, err)
+
+		ids := make([]string, 0, len(channels))
+		for _, ch := range channels {
+			ids = append(ids, ch.Id)
+			assert.Equal(t, model.ChannelTypePrivate, ch.Type, "only private channels should be returned")
+		}
+		assert.Contains(t, ids, private1.Id)
+		assert.Contains(t, ids, private2.Id)
 	})
 }
 
@@ -4394,6 +4594,89 @@ func TestUpdateChannelRoles(t *testing.T) {
 	CheckForbiddenStatus(t, resp)
 }
 
+func TestUpdateChannelMemberRolesRejectsNonChannelScopedRoles(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+	client := th.Client
+
+	const channelAdmin = "channel_user channel_admin"
+	const channelMember = "channel_user"
+
+	channel := th.CreatePublicChannel(t)
+
+	_, appErr := th.App.AddUserToChannel(th.Context, th.BasicUser2, channel, false)
+	require.Nil(t, appErr)
+
+	invalidRoles := []struct {
+		name        string
+		roles       string
+		expectedErr string
+	}{
+		{name: "system manager with channel user", roles: channelMember + " " + model.SystemManagerRoleId},
+		{name: "system user manager with channel user", roles: channelMember + " " + model.SystemUserManagerRoleId},
+		{name: "system admin with channel admin", roles: channelAdmin + " " + model.SystemAdminRoleId},
+		{name: "team user with channel user", roles: channelMember + " " + model.TeamUserRoleId},
+		{name: "team admin with channel user", roles: channelMember + " " + model.TeamAdminRoleId},
+		{name: "team post all with channel user", roles: channelMember + " " + model.TeamPostAllRoleId},
+		{name: "system post all with channel user", roles: channelMember + " " + model.SystemPostAllRoleId},
+		{name: "system read only admin with channel user", roles: channelMember + " " + model.SystemReadOnlyAdminRoleId},
+		{name: "custom group user with channel user", roles: channelMember + " " + model.CustomGroupUserRoleId},
+		{name: "channel guest with channel admin", roles: model.ChannelGuestRoleId + " " + model.ChannelAdminRoleId, expectedErr: "api.channel.update_channel_member_roles.guest_and_admin.app_error"},
+	}
+
+	for _, tc := range invalidRoles {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			memberBefore, _, err := client.GetChannelMember(context.Background(), channel.Id, th.BasicUser2.Id, "")
+			require.NoError(t, err)
+			rolesBefore := memberBefore.Roles
+
+			resp, err := client.UpdateChannelRoles(context.Background(), channel.Id, th.BasicUser2.Id, tc.roles)
+			require.Error(t, err)
+			CheckBadRequestStatus(t, resp)
+			if tc.expectedErr != "" {
+				CheckErrorID(t, err, tc.expectedErr)
+			}
+
+			memberAfter, _, err := client.GetChannelMember(context.Background(), channel.Id, th.BasicUser2.Id, "")
+			require.NoError(t, err)
+			require.Equal(t, rolesBefore, memberAfter.Roles)
+		})
+	}
+
+	validRoles := []struct {
+		name  string
+		roles string
+	}{
+		{name: "channel member", roles: channelMember},
+		{name: "channel admin", roles: channelAdmin},
+	}
+
+	for _, tc := range validRoles {
+		t.Run("accepts "+tc.name, func(t *testing.T) {
+			_, err := client.UpdateChannelRoles(context.Background(), channel.Id, th.BasicUser2.Id, tc.roles)
+			require.NoError(t, err)
+
+			member, _, err := client.GetChannelMember(context.Background(), channel.Id, th.BasicUser2.Id, "")
+			require.NoError(t, err)
+			require.Equal(t, tc.roles, member.Roles)
+		})
+	}
+
+	t.Run("rejects system manager assigned by system admin", func(t *testing.T) {
+		memberBefore, _, err := th.SystemAdminClient.GetChannelMember(context.Background(), channel.Id, th.BasicUser2.Id, "")
+		require.NoError(t, err)
+		rolesBefore := memberBefore.Roles
+
+		resp, err := th.SystemAdminClient.UpdateChannelRoles(context.Background(), channel.Id, th.BasicUser2.Id, channelMember+" "+model.SystemManagerRoleId)
+		require.Error(t, err)
+		CheckBadRequestStatus(t, resp)
+
+		memberAfter, _, err := th.SystemAdminClient.GetChannelMember(context.Background(), channel.Id, th.BasicUser2.Id, "")
+		require.NoError(t, err)
+		require.Equal(t, rolesBefore, memberAfter.Roles)
+	})
+}
+
 func TestUpdateChannelMemberSchemeRoles(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
@@ -5056,22 +5339,24 @@ func TestAddChannelMemberFromThread(t *testing.T) {
 	// here between the "added user to the channel" message and the GetUserThread call
 	require.LessOrEqual(t, int64(2), ut.UnreadMentions)
 
+	// Thread updates arrive as incremental deltas (0→1→2), not a single
+	// 0→2 jump, so we only assert on the final state. The previous_unread_*
+	// values depend on how the replies are batched and aren't meaningful
+	// to pin down here.
 	var caught bool
 	func() {
 		for {
 			select {
 			case ev := <-wsClient.EventChannel:
 				if ev.EventType() == model.WebsocketEventThreadUpdated {
-					caught = true
 					var thread model.ThreadResponse
 					data := ev.GetData()
 					jsonErr := json.Unmarshal([]byte(data["thread"].(string)), &thread)
-
 					require.NoError(t, jsonErr)
-					require.EqualValues(t, int64(2), thread.UnreadReplies)
-					require.EqualValues(t, int64(2), thread.UnreadMentions)
-					require.EqualValues(t, float64(0), data["previous_unread_replies"])
-					require.EqualValues(t, float64(0), data["previous_unread_mentions"])
+					if thread.UnreadReplies == 2 && thread.UnreadMentions == 2 {
+						caught = true
+						return
+					}
 				}
 			case <-time.After(2 * time.Second):
 				return
@@ -7314,5 +7599,201 @@ func TestSetChannelMembers(t *testing.T) {
 		member, _, err = th.SystemAdminClient.GetChannelMember(ctx, channel.Id, th.BasicUser.Id, "")
 		require.NoError(t, err)
 		assert.False(t, member.SchemeAdmin, "BasicUser should no longer be admin")
+	})
+}
+
+func TestGetManagedCategories(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := SetupConfig(t, func(cfg *model.Config) {
+		cfg.FeatureFlags.ManagedChannelCategories = true
+	}).InitBasic(t)
+	client := th.Client
+
+	t.Run("should return 501 without enterprise license", func(t *testing.T) {
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.Error(t, err)
+		require.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+	})
+
+	t.Run("should return empty map when no managed categories exist", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		defer func() {
+			appErr := th.App.Srv().RemoveLicense()
+			require.Nil(t, appErr)
+		}()
+
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&mappings))
+		assert.Empty(t, mappings)
+	})
+
+	t.Run("should return managed category mappings for the user's channels", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		defer func() {
+			appErr := th.App.Srv().RemoveLicense()
+			require.Nil(t, appErr)
+		}()
+
+		appErr := th.App.SetChannelManagedCategory(th.Context, th.BasicChannel.Id, "Operations")
+		require.Nil(t, appErr)
+		defer func() {
+			_ = th.App.ClearChannelManagedCategory(th.Context, th.BasicChannel.Id)
+		}()
+
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&mappings))
+		assert.Equal(t, "Operations", mappings[th.BasicChannel.Id])
+	})
+}
+
+func TestGetManagedCategoriesFeatureFlagDisabled(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := SetupConfig(t, func(cfg *model.Config) {
+		cfg.FeatureFlags.ManagedChannelCategories = false
+	}).InitBasic(t)
+
+	t.Run("route is not registered when feature flag is off at startup", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		defer func() {
+			appErr := th.App.Srv().RemoveLicense()
+			require.Nil(t, appErr)
+		}()
+
+		resp, err := th.Client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.Error(t, err)
+		require.Equal(t, http.StatusNotFound, resp.StatusCode)
+	})
+}
+
+func TestPatchChannelManagedCategory(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := SetupConfig(t, func(cfg *model.Config) {
+		cfg.FeatureFlags.ManagedChannelCategories = true
+	}).InitBasic(t)
+	th.ConfigStore.SetReadOnlyFF(false)
+	t.Cleanup(func() {
+		th.ConfigStore.SetReadOnlyFF(true)
+	})
+	client := th.Client
+
+	enableManagedCategories := func() {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = true })
+	}
+	disableManagedCategories := func() {
+		th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = false })
+	}
+	removeLicense := func() {
+		appErr := th.App.Srv().RemoveLicense()
+		require.Nil(t, appErr)
+	}
+
+	t.Run("non-admin should get 403 when feature is enabled", func(t *testing.T) {
+		enableManagedCategories()
+		defer removeLicense()
+
+		channel := th.CreatePublicChannel(t)
+
+		user := th.CreateUser(t)
+		th.LinkUserToTeam(t, user, th.BasicTeam)
+		th.AddUserToChannel(t, user, channel)
+		userClient := th.CreateClient()
+		_, _, err := userClient.Login(context.Background(), user.Email, user.Password)
+		require.NoError(t, err)
+
+		categoryName := "Operations"
+		patch := &model.ChannelPatch{ManagedCategoryName: &categoryName}
+		_, resp, err := userClient.PatchChannel(context.Background(), channel.Id, patch)
+		require.Error(t, err)
+		CheckForbiddenStatus(t, resp)
+	})
+
+	t.Run("should silently ignore when no enterprise license", func(t *testing.T) {
+		removeLicense()
+
+		channel := th.CreatePublicChannel(t)
+
+		categoryName := "Operations"
+		patch := &model.ChannelPatch{ManagedCategoryName: &categoryName}
+		_, _, err := client.PatchChannel(context.Background(), channel.Id, patch)
+		require.NoError(t, err)
+
+		enableManagedCategories()
+		defer removeLicense()
+
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&mappings))
+		_, exists := mappings[channel.Id]
+		assert.False(t, exists, "managed category should not be set without license")
+	})
+
+	t.Run("should silently ignore when feature is disabled", func(t *testing.T) {
+		th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+		disableManagedCategories()
+		defer removeLicense()
+
+		channel := th.CreatePublicChannel(t)
+
+		categoryName := "Operations"
+		patch := &model.ChannelPatch{ManagedCategoryName: &categoryName}
+		_, _, err := client.PatchChannel(context.Background(), channel.Id, patch)
+		require.NoError(t, err)
+
+		enableManagedCategories()
+
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&mappings))
+		_, exists := mappings[channel.Id]
+		assert.False(t, exists, "managed category should not be set when feature is disabled")
+	})
+
+	t.Run("happy path: set and clear managed category", func(t *testing.T) {
+		enableManagedCategories()
+		defer removeLicense()
+
+		channel := th.CreatePublicChannel(t)
+
+		categoryName := "Operations"
+		patch := &model.ChannelPatch{ManagedCategoryName: &categoryName}
+		_, _, err := client.PatchChannel(context.Background(), channel.Id, patch)
+		require.NoError(t, err)
+
+		resp, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		var mappings map[string]string
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&mappings))
+		assert.Equal(t, "Operations", mappings[channel.Id])
+
+		emptyName := ""
+		clearPatch := &model.ChannelPatch{ManagedCategoryName: &emptyName}
+		_, _, err = client.PatchChannel(context.Background(), channel.Id, clearPatch)
+		require.NoError(t, err)
+
+		resp2, err := client.DoAPIGet(context.Background(), fmt.Sprintf("/teams/%s/channels/managed_categories", th.BasicTeam.Id), "")
+		require.NoError(t, err)
+		defer resp2.Body.Close()
+
+		var mappings2 map[string]string
+		require.NoError(t, json.NewDecoder(resp2.Body).Decode(&mappings2))
+		_, exists := mappings2[channel.Id]
+		assert.False(t, exists, "managed category should be cleared")
 	})
 }

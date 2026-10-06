@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -297,6 +296,38 @@ func TestFileSettingsDirectoryWhitespaceValidation(t *testing.T) {
 	}
 }
 
+func TestFileSettingsExtractContentTimeout(t *testing.T) {
+	t.Run("default is valid", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.SetDefaults()
+		require.NotNil(t, cfg.FileSettings.ExtractContentTimeout)
+		assert.Equal(t, 10, *cfg.FileSettings.ExtractContentTimeout)
+		assert.Nil(t, cfg.FileSettings.isValid())
+	})
+
+	t.Run("zero disables the timeout and is valid", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.SetDefaults()
+		cfg.FileSettings.ExtractContentTimeout = NewPointer(0)
+		assert.Nil(t, cfg.FileSettings.isValid())
+	})
+
+	t.Run("a positive value is valid", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.SetDefaults()
+		cfg.FileSettings.ExtractContentTimeout = NewPointer(10)
+		assert.Nil(t, cfg.FileSettings.isValid())
+	})
+
+	t.Run("a negative value is rejected", func(t *testing.T) {
+		cfg := &Config{}
+		cfg.SetDefaults()
+		cfg.FileSettings.ExtractContentTimeout = NewPointer(-1)
+		err := cfg.FileSettings.isValid()
+		require.NotNil(t, err)
+		assert.Equal(t, "model.config.is_valid.extract_content_timeout.app_error", err.Id)
+	})
+}
 func TestConfigDefaultSignatureAlgorithm(t *testing.T) {
 	c1 := Config{}
 	c1.SetDefaults()
@@ -1597,7 +1628,6 @@ func TestConfigSanitize(t *testing.T) {
 	*c.OpenIdSettings.Secret = "secret"
 	*c.ServiceSettings.GoogleDeveloperKey = "google-api-key"
 	*c.ServiceSettings.GiphySdkKey = "giphy-sdk-key"
-	*c.ElasticsearchSettings.ClientKey = "/path/to/client-key.pem"
 	*c.AutoTranslationSettings.LibreTranslate.APIKey = "libre-api-key"
 	c.SqlSettings.DataSourceReplicas = []string{"stuff"}
 	c.SqlSettings.DataSourceSearchReplicas = []string{"stuff"}
@@ -1620,7 +1650,6 @@ func TestConfigSanitize(t *testing.T) {
 	assert.Equal(t, FakeSetting, *c.SqlSettings.DataSource)
 	assert.Equal(t, FakeSetting, *c.SqlSettings.AtRestEncryptKey)
 	assert.Equal(t, FakeSetting, *c.ElasticsearchSettings.Password)
-	assert.Equal(t, FakeSetting, *c.ElasticsearchSettings.ClientKey)
 	assert.Equal(t, FakeSetting, *c.ServiceSettings.GoogleDeveloperKey)
 	assert.Equal(t, FakeSetting, *c.ServiceSettings.GiphySdkKey)
 	assert.Equal(t, FakeSetting, c.SqlSettings.DataSourceReplicas[0])
@@ -1642,7 +1671,7 @@ func TestConfigSanitize(t *testing.T) {
 	t.Run("partially sanitize DataSource", func(t *testing.T) {
 		c := Config{}
 		c.SetDefaults()
-		*c.SqlSettings.DataSource = "postgres://mmuser:mostest@localhost:5432/mattermost_test?sslmode=disable"
+		*c.SqlSettings.DataSource = "postgres://mmuser:mostest_password@localhost:5432/mattermost_test?sslmode=disable"
 		c.Sanitize(nil, &SanitizeOptions{PartiallyRedactDataSources: true})
 
 		expectedURL := "postgres://" + SanitizedPassword + ":" + SanitizedPassword + "@localhost:5432/mattermost_test?sslmode=disable"
@@ -1924,15 +1953,15 @@ func TestSanitizeDataSource(t *testing.T) {
 				"",
 			},
 			{
-				"postgres://mmuser:mostest@localhost",
+				"postgres://mmuser:mostest_password@localhost",
 				"postgres://" + SanitizedPassword + ":" + SanitizedPassword + "@localhost",
 			},
 			{
-				"postgres://mmuser:mostest@localhost/dummy?sslmode=disable",
+				"postgres://mmuser:mostest_password@localhost/dummy?sslmode=disable",
 				"postgres://" + SanitizedPassword + ":" + SanitizedPassword + "@localhost/dummy?sslmode=disable",
 			},
 			{
-				"postgres://localhost/dummy?sslmode=disable&user=mmuser&password=mostest",
+				"postgres://localhost/dummy?sslmode=disable&user=mmuser&password=mostest_password",
 				"postgres://" + SanitizedPassword + ":" + SanitizedPassword + "@localhost/dummy?sslmode=disable",
 			},
 		}
@@ -2200,8 +2229,8 @@ func TestConfigDefaultCallsPluginState(t *testing.T) {
 	})
 
 	t.Run("should enable Calls plugin by default on Cloud", func(t *testing.T) {
-		os.Setenv("MM_CLOUD_INSTALLATION_ID", "test")
-		defer os.Unsetenv("MM_CLOUD_INSTALLATION_ID")
+		// t.Setenv prevents t.Parallel — env var has no config equivalent
+		t.Setenv("MM_CLOUD_INSTALLATION_ID", "test")
 		c1 := Config{}
 		c1.SetDefaults()
 
@@ -2233,8 +2262,8 @@ func TestConfigDefaultAIPluginState(t *testing.T) {
 	})
 
 	t.Run("should enable AI plugin by default on Cloud", func(t *testing.T) {
-		os.Setenv("MM_CLOUD_INSTALLATION_ID", "test")
-		defer os.Unsetenv("MM_CLOUD_INSTALLATION_ID")
+		// t.Setenv prevents t.Parallel — env var has no config equivalent
+		t.Setenv("MM_CLOUD_INSTALLATION_ID", "test")
 		c1 := Config{}
 		c1.SetDefaults()
 
@@ -2922,4 +2951,83 @@ func TestConfigAccessTagsMapToValidPermissions(t *testing.T) {
 	}
 
 	checkStruct(t, reflect.TypeFor[Config](), "Config")
+}
+
+func TestNativeAppSettingsIsValid(t *testing.T) {
+	t.Run("defaults are valid", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		require.Nil(t, cfg.NativeAppSettings.AreDownloadLinksValid())
+	})
+
+	t.Run("empty string is valid (hides the menu item)", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.AppDownloadLink = ""
+		*cfg.NativeAppSettings.AndroidAppDownloadLink = ""
+		*cfg.NativeAppSettings.IosAppDownloadLink = ""
+		require.Nil(t, cfg.NativeAppSettings.AreDownloadLinksValid())
+	})
+
+	t.Run("valid https URLs are accepted", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.AppDownloadLink = "https://example.com/download"
+		*cfg.NativeAppSettings.AndroidAppDownloadLink = "https://play.google.com/store/apps/details?id=com.mattermost.rn"
+		*cfg.NativeAppSettings.IosAppDownloadLink = "https://apps.apple.com/us/app/mattermost/id1257222717"
+		require.Nil(t, cfg.NativeAppSettings.AreDownloadLinksValid())
+	})
+
+	t.Run("custom scheme URLs are accepted for enterprise use cases", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.AppDownloadLink = "myapp://install/mattermost"
+		require.Nil(t, cfg.NativeAppSettings.AreDownloadLinksValid())
+	})
+
+	t.Run("malformed AppDownloadLink is rejected", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.AppDownloadLink = "http://://mattermost.com"
+		appErr := cfg.NativeAppSettings.AreDownloadLinksValid()
+		require.NotNil(t, appErr)
+		require.Equal(t, "model.config.is_valid.native_app_settings.download_link.app_error", appErr.Id)
+	})
+
+	t.Run("malformed AndroidAppDownloadLink is rejected", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.AndroidAppDownloadLink = "not-a-url"
+		appErr := cfg.NativeAppSettings.AreDownloadLinksValid()
+		require.NotNil(t, appErr)
+		require.Equal(t, "model.config.is_valid.native_app_settings.download_link.app_error", appErr.Id)
+	})
+
+	t.Run("malformed IosAppDownloadLink is rejected", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		*cfg.NativeAppSettings.IosAppDownloadLink = "not-a-url"
+		appErr := cfg.NativeAppSettings.AreDownloadLinksValid()
+		require.NotNil(t, appErr)
+		require.Equal(t, "model.config.is_valid.native_app_settings.download_link.app_error", appErr.Id)
+	})
+}
+
+func TestExperimentalSettingsEnableWatermarkDefault(t *testing.T) {
+	t.Parallel()
+
+	t.Run("EnableWatermark defaults to false", func(t *testing.T) {
+		cfg := Config{}
+		cfg.SetDefaults()
+		require.NotNil(t, cfg.ExperimentalSettings.EnableWatermark)
+		require.False(t, *cfg.ExperimentalSettings.EnableWatermark)
+	})
+
+	t.Run("SetDefaults does not overwrite explicit true value", func(t *testing.T) {
+		cfg := Config{}
+		cfg.ExperimentalSettings.EnableWatermark = NewPointer(true)
+		cfg.SetDefaults()
+		require.NotNil(t, cfg.ExperimentalSettings.EnableWatermark)
+		require.True(t, *cfg.ExperimentalSettings.EnableWatermark)
+	})
 }

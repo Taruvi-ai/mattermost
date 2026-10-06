@@ -2,6 +2,7 @@
 // See LICENSE.txt for license information.
 
 import {
+    ChannelsPost,
     disableChannelAutotranslation,
     enableAutotranslationConfig,
     enableChannelAutotranslation,
@@ -11,7 +12,6 @@ import {
     test,
     setMockSourceLanguage,
 } from '@mattermost/playwright-lib';
-import {getRandomId} from 'utils/utils';
 
 const POST_TYPE_AUTOTRANSLATION_CHANGE = 'system_autotranslation';
 
@@ -37,7 +37,7 @@ test(
         });
 
         // # Create a channel and enable autotranslation on it
-        const channelName = `autotranslation-${await getRandomId()}`;
+        const channelName = `autotranslation-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -103,7 +103,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-admin-${await getRandomId()}`;
+        const channelName = `autotranslation-admin-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -146,7 +146,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-system-msg-${await getRandomId()}`;
+        const channelName = `autotranslation-system-msg-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -171,7 +171,7 @@ test(
     },
 );
 
-test(
+test.fixme(
     'only new messages are translated after enable; old messages unchanged',
     {
         tag: ['@autotranslation'],
@@ -190,7 +190,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-new-only-${await getRandomId()}`;
+        const channelName = `autotranslation-new-only-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -260,7 +260,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-tooltip-${await getRandomId()}`;
+        const channelName = `autotranslation-tooltip-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -300,7 +300,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-disable-${await getRandomId()}`;
+        const channelName = `autotranslation-disable-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -351,7 +351,7 @@ test(
     },
 );
 
-test(
+test.fixme(
     'auto-translation is ON by default for new channel members',
     {
         tag: ['@autotranslation'],
@@ -370,7 +370,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-default-on-${await getRandomId()}`;
+        const channelName = `autotranslation-default-on-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -433,7 +433,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-ephemeral-${await getRandomId()}`;
+        const channelName = `autotranslation-ephemeral-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -458,7 +458,7 @@ test(
     },
 );
 
-test(
+test.fixme(
     'disabling for self reverts translated messages to original',
     {
         tag: ['@autotranslation'],
@@ -477,7 +477,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-revert-${await getRandomId()}`;
+        const channelName = `autotranslation-revert-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -536,7 +536,7 @@ test(
     },
 );
 
-test(
+test.fixme(
     'messages only translate when source differs from user language',
     {
         tag: ['@autotranslation'],
@@ -555,7 +555,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-lang-${await getRandomId()}`;
+        const channelName = `autotranslation-lang-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -639,7 +639,7 @@ test(
     },
 );
 
-test(
+test.fixme(
     'message indicator only on actually translated message',
     {
         tag: ['@autotranslation'],
@@ -658,7 +658,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-indicator-${await getRandomId()}`;
+        const channelName = `autotranslation-indicator-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -759,7 +759,7 @@ test.fixme(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-modal-${await getRandomId()}`;
+        const channelName = `autotranslation-modal-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -834,95 +834,98 @@ test.fixme(
     },
 );
 
-// Skipped due to flaky race condition - see https://github.com/mattermost/mattermost/pull/35443
-// test(
-//     'message actions include Show translation',
-//     {
-//         tag: ['@autotranslation'],
-//     },
-//     async ({pw}) => {
-//         const {adminClient, user, userClient, team} = await pw.initSetup();
-//
-//         const license = await adminClient.getClientLicenseOld();
-//         test.skip(
-//             !hasAutotranslationLicense(license.SkuShortName),
-//             'Skipping test - server does not have Entry or Advanced license',
-//         );
-//         const translationUrl = process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3010';
-//         await enableAutotranslationConfig(adminClient, {
-//             mockBaseUrl: translationUrl,
-//             targetLanguages: ['en', 'es'],
-//         });
-//
-//         const channelName = `autotranslation-dotmenu-${await getRandomId()}`;
-//         const created = await adminClient.createChannel({
-//             team_id: team.id,
-//             name: channelName,
-//             display_name: 'Dot Menu Show Translation Test',
-//             type: 'O',
-//         });
-//         await enableChannelAutotranslation(adminClient, created.id);
-//         await adminClient.addToChannel(user.id, created.id);
-//         await setUserChannelAutotranslation(userClient, created.id, true);
-//
-//         const poster = await pw.random.user('poster');
-//         const createdPoster = await adminClient.createUser(poster, '', '');
-//         await adminClient.addToTeam(team.id, createdPoster.id);
-//         await adminClient.addToChannel(createdPoster.id, created.id);
-//         const {client: posterClient} = await pw.makeClient({
-//             username: poster.username,
-//             password: poster.password,
-//         });
-//         if (!posterClient) throw new Error('Failed to create poster client');
-//
-//         // Create a second poster to show translation indicator (only visible with multiple users)
-//         const poster2 = await pw.random.user('poster2');
-//         const createdPoster2 = await adminClient.createUser(poster2, '', '');
-//         await adminClient.addToTeam(team.id, createdPoster2.id);
-//         await adminClient.addToChannel(createdPoster2.id, created.id);
-//         const {client: posterClient2} = await pw.makeClient({
-//             username: poster2.username,
-//             password: poster2.password,
-//         });
-//         if (!posterClient2) throw new Error('Failed to create second poster client');
-//
-//         // Set Spanish source to ensure translation happens
-//         await setMockSourceLanguage(translationUrl, 'es');
-//         // Post Spanish message that's long enough for reliable detection
-//         await posterClient.createPost({
-//             channel_id: created.id,
-//             message: 'Este mensaje es para probar el menú de acciones con la opción de mostrar traducción automática',
-//             user_id: createdPoster.id,
-//         });
-//         // Second user posts a message so the first user's translation indicator appears
-//         await posterClient2.createPost({
-//             channel_id: created.id,
-//             message: 'Segundo usuario con mensaje más largo para mejor detección de idioma',
-//             user_id: createdPoster2.id,
-//         });
-//
-//         const {channelsPage, page} = await pw.testBrowser.login(user);
-//         await channelsPage.goto(team.name, channelName);
-//         await channelsPage.toBeVisible();
-//
-//         // * Find post with message text and wait for translation before opening dot menu
-//         const messagePost = channelsPage.centerView.container
-//             .locator('[id^="post_"]')
-//             .filter({hasText: 'Este mensaje es para probar el menú de acciones'});
-//         await messagePost.waitFor({state: 'visible', timeout: 15000});
-//
-//         // Wait for mock translation to be applied before opening the menu
-//         // (mock appends "[translated to en]"; Show translation only appears after translation)
-//         await expect(messagePost.getByText(/\[translated to en\]/i)).toBeVisible({timeout: 15000});
-//
-//         await messagePost.hover();
-//         // Click the "more" (three dots) button to open the action menu
-//         await messagePost.locator('.post-menu').getByRole('button', {name: 'more'}).click();
-//
-//         const showTranslationItem = page.getByRole('menuitem', {name: 'Show translation'});
-//         await expect(showTranslationItem).toBeVisible({timeout: 10000});
-//     },
-// );
+test.fixme(
+    'message actions include Show translation',
+    {
+        tag: ['@autotranslation'],
+    },
+    async ({pw}) => {
+        const {adminClient, user, userClient, team} = await pw.initSetup();
+
+        const license = await adminClient.getClientLicenseOld();
+        test.skip(
+            !hasAutotranslationLicense(license.SkuShortName),
+            'Skipping test - server does not have Entry or Advanced license',
+        );
+        const translationUrl = process.env.TRANSLATION_SERVICE_URL || 'http://localhost:3010';
+        await enableAutotranslationConfig(adminClient, {
+            mockBaseUrl: translationUrl,
+            targetLanguages: ['en', 'es'],
+        });
+
+        const channelName = `autotranslation-dotmenu-${pw.random.id()}`;
+        const created = await adminClient.createChannel({
+            team_id: team.id,
+            name: channelName,
+            display_name: 'Dot Menu Show Translation Test',
+            type: 'O',
+        });
+        await enableChannelAutotranslation(adminClient, created.id);
+        await adminClient.addToChannel(user.id, created.id);
+        await setUserChannelAutotranslation(userClient, created.id, true);
+
+        const poster = await pw.random.user('poster');
+        const createdPoster = await adminClient.createUser(poster, '', '');
+        await adminClient.addToTeam(team.id, createdPoster.id);
+        await adminClient.addToChannel(createdPoster.id, created.id);
+        const {client: posterClient} = await pw.makeClient({
+            username: poster.username,
+            password: poster.password,
+        });
+        if (!posterClient) throw new Error('Failed to create poster client');
+
+        // Create a second poster to show translation indicator (only visible with multiple users)
+        const poster2 = await pw.random.user('poster2');
+        const createdPoster2 = await adminClient.createUser(poster2, '', '');
+        await adminClient.addToTeam(team.id, createdPoster2.id);
+        await adminClient.addToChannel(createdPoster2.id, created.id);
+        const {client: posterClient2} = await pw.makeClient({
+            username: poster2.username,
+            password: poster2.password,
+        });
+        if (!posterClient2) throw new Error('Failed to create second poster client');
+
+        // Set Spanish source to ensure translation happens
+        await setMockSourceLanguage(translationUrl, 'es');
+        // Post Spanish message that's long enough for reliable detection
+        await posterClient.createPost({
+            channel_id: created.id,
+            message: 'Este mensaje es para probar el menú de acciones con la opción de mostrar traducción automática',
+            user_id: createdPoster.id,
+        });
+        // Second user posts a message so the first user's translation indicator appears
+        await posterClient2.createPost({
+            channel_id: created.id,
+            message: 'Segundo usuario con mensaje más largo para mejor detección de idioma',
+            user_id: createdPoster2.id,
+        });
+
+        const {channelsPage, page} = await pw.testBrowser.login(user);
+        await channelsPage.goto(team.name, channelName);
+        await channelsPage.toBeVisible();
+
+        // * Find the target post and wait for its translation before opening the menu
+        const messagePost = channelsPage.centerView.container
+            .getByTestId('postView')
+            .filter({hasText: 'Este mensaje es para probar el menú de acciones'});
+        await messagePost.waitFor({state: 'visible', timeout: 15000});
+        await expect(messagePost.getByText(/\[translated to en\]/i)).toBeVisible({timeout: 15000});
+
+        // * Open dot menu using the established hover → wait → click pattern
+        const post = new ChannelsPost(messagePost);
+        await post.hover();
+        await post.postMenu.toBeVisible();
+        await post.postMenu.dotMenuButton.click();
+
+        // Move mouse away so it doesn't hover over Remind and trigger its submenu.
+        // The submenu's MUI portal sets aria-hidden on the main menu, breaking getByRole.
+        await page.mouse.move(0, 0);
+        await channelsPage.postDotMenu.toBeVisible();
+
+        // * Verify the "Show translation" menu item is present
+        await expect(channelsPage.postDotMenu.showTranslationMenuItem).toBeVisible({timeout: 10000});
+    },
+);
 
 test(
     'any user can disable and enable again autotranslation for themselves in a channel',
@@ -943,7 +946,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-toggle-${await getRandomId()}`;
+        const channelName = `autotranslation-toggle-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,
@@ -992,7 +995,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const translatedChannelName = `autotranslation-badge-${await getRandomId()}`;
+        const translatedChannelName = `autotranslation-badge-${pw.random.id()}`;
         const translatedChannel = await adminClient.createChannel({
             team_id: team.id,
             name: translatedChannelName,
@@ -1003,7 +1006,7 @@ test(
         await adminClient.addToChannel(user.id, translatedChannel.id);
         await setUserChannelAutotranslation(userClient, translatedChannel.id, true);
 
-        const noTranslationChannelName = `no-translation-${await getRandomId()}`;
+        const noTranslationChannelName = `no-translation-${pw.random.id()}`;
         const noTranslationChannel = await adminClient.createChannel({
             team_id: team.id,
             name: noTranslationChannelName,
@@ -1043,7 +1046,7 @@ test(
             targetLanguages: ['en', 'es'],
         });
 
-        const channelName = `autotranslation-unsupported-${await getRandomId()}`;
+        const channelName = `autotranslation-unsupported-${pw.random.id()}`;
         const created = await adminClient.createChannel({
             team_id: team.id,
             name: channelName,

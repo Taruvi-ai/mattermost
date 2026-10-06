@@ -1,8 +1,7 @@
 // Copyright (c) 2015-present Mattermost, Inc. All Rights Reserved.
 // See LICENSE.txt for license information.
 
-import {expect, test} from '@mattermost/playwright-lib';
-
+import {expect, getAdminClient, test} from '@mattermost/playwright-lib';
 const OBFUSCATED_SLUG_RE = /^[a-z0-9]{26}$/;
 
 async function skipIfNoAdvancedLicense(adminClient: any) {
@@ -11,11 +10,7 @@ async function skipIfNoAdvancedLicense(adminClient: any) {
 }
 
 async function setAnonymousUrls(adminClient: any, enabled: boolean) {
-    await adminClient.patchConfig({
-        PrivacySettings: {
-            UseAnonymousURLs: enabled,
-        },
-    });
+    await adminClient.patchConfig({PrivacySettings: {UseAnonymousURLs: enabled}});
 }
 
 function expectObfuscatedSlug(slug: string) {
@@ -80,6 +75,28 @@ async function createAnonymousUrlChannel(
 }
 
 test.describe('Anonymous URLs', () => {
+    // initSetup patches only the on-prem overrides, so PrivacySettings survives from whichever
+    // test ran last. Start every test from the default (off); tests needing it on enable it.
+    test.beforeEach(async () => {
+        const {adminClient} = await getAdminClient({skipLog: true});
+        await setAnonymousUrls(adminClient, false);
+    });
+
+    // Reset PrivacySettings.UseAnonymousURLs to its default (off) at the end
+    // of this file so leftover state does not affect other suites. Tests within
+    // this file explicitly set the value they need at the start of each test.
+    test.afterAll(async () => {
+        try {
+            const {adminClient} = await getAdminClient({skipLog: true});
+            await adminClient.patchConfig({
+                PrivacySettings: {
+                    UseAnonymousURLs: false,
+                },
+            });
+        } catch {
+            // Best-effort cleanup; do not fail the suite if admin client is unavailable.
+        }
+    });
     /**
      * @objective Verify that the anonymous URLs setting can be toggled on from System Console and persists after navigation
      *
@@ -383,7 +400,7 @@ test.describe('Anonymous URLs', () => {
             await channelsPage.goto(team.name);
             await channelsPage.toBeVisible();
 
-            const channelDisplayName = `Archived Anonymous ${await pw.random.id()}`;
+            const channelDisplayName = `Archived Anonymous ${pw.random.id()}`;
             await createChannelFromUI(channelsPage, channelDisplayName);
 
             const createdChannel = await getChannelByDisplayName(adminClient, team.id, channelDisplayName);
@@ -423,8 +440,8 @@ test.describe('Anonymous URLs', () => {
             await adminClient.addToTeam(team.id, adminUser.id);
 
             // # Create a legacy channel and team before enabling anonymous URLs
-            const legacyChannelSlug = `legacy-channel-${await pw.random.id()}`;
-            const legacyChannelDisplayName = `Legacy Channel ${await pw.random.id()}`;
+            const legacyChannelSlug = `legacy-channel-${pw.random.id()}`;
+            const legacyChannelDisplayName = `Legacy Channel ${pw.random.id()}`;
             const legacyChannel = await adminClient.createChannel({
                 team_id: team.id,
                 name: legacyChannelSlug,
@@ -432,8 +449,8 @@ test.describe('Anonymous URLs', () => {
                 type: 'O',
             });
 
-            const legacyTeamSlug = `legacy-team-${await pw.random.id()}`;
-            const legacyTeamDisplayName = `Legacy Team ${await pw.random.id()}`;
+            const legacyTeamSlug = `legacy-team-${pw.random.id()}`;
+            const legacyTeamDisplayName = `Legacy Team ${pw.random.id()}`;
             const legacyTeam = await adminClient.createTeam({
                 name: legacyTeamSlug,
                 display_name: legacyTeamDisplayName,
@@ -460,7 +477,7 @@ test.describe('Anonymous URLs', () => {
             await expect(channelsPage.page).toHaveURL(`/${team.name}/channels/${legacyChannelSlug}`);
 
             // # Create a new channel after the anonymous URL toggle
-            const anonymousChannelDisplayName = `Anonymous Channel ${await pw.random.id()}`;
+            const anonymousChannelDisplayName = `Anonymous Channel ${pw.random.id()}`;
             await channelsPage.goto(team.name);
             await channelsPage.toBeVisible();
             await createChannelFromUI(channelsPage, anonymousChannelDisplayName);
@@ -472,7 +489,7 @@ test.describe('Anonymous URLs', () => {
             await expect(channelsPage.page).toHaveURL(`/${team.name}/channels/${anonymousChannel.name}`);
 
             // # Create a new team after the anonymous URL toggle
-            const anonymousTeamDisplayName = `Anonymous Team ${await pw.random.id()}`;
+            const anonymousTeamDisplayName = `Anonymous Team ${pw.random.id()}`;
             await createTeamFromUI(channelsPage, anonymousTeamDisplayName);
 
             const anonymousTeam = await getTeamByDisplayName(adminClient, anonymousTeamDisplayName);
@@ -504,8 +521,8 @@ test.describe('Anonymous URLs', () => {
             const dmChannel = await adminClient.createDirectChannel([adminUser.id, secondUser.id]);
             const gmChannel = await adminClient.createGroupChannel([adminUser.id, secondUser.id, thirdUser.id]);
 
-            const dmMessage = `Anonymous URL DM ${await pw.random.id()}`;
-            const gmMessage = `Anonymous URL GM ${await pw.random.id()}`;
+            const dmMessage = `Anonymous URL DM ${pw.random.id()}`;
+            const gmMessage = `Anonymous URL GM ${pw.random.id()}`;
             await adminClient.createPost({channel_id: dmChannel.id, message: dmMessage});
             await adminClient.createPost({channel_id: gmChannel.id, message: gmMessage});
 
@@ -553,7 +570,7 @@ test.describe('Anonymous URLs', () => {
             await channelsPage.goto(team.name);
             await channelsPage.toBeVisible();
 
-            const originalDisplayName = `Original Channel ${await pw.random.id()}`;
+            const originalDisplayName = `Original Channel ${pw.random.id()}`;
             await createChannelFromUI(channelsPage, originalDisplayName);
 
             const createdChannel = await getChannelByDisplayName(adminClient, team.id, originalDisplayName);
@@ -561,7 +578,7 @@ test.describe('Anonymous URLs', () => {
             expectObfuscatedSlug(originalSlug);
 
             // # Rename the channel from channel settings
-            const renamedDisplayName = `Renamed Channel ${await pw.random.id()}`;
+            const renamedDisplayName = `Renamed Channel ${pw.random.id()}`;
             const channelSettingsModal = await channelsPage.openChannelSettings();
             const infoTab = await channelSettingsModal.openInfoTab();
             await infoTab.updateName(renamedDisplayName);
@@ -606,7 +623,7 @@ test.describe('Anonymous URLs', () => {
             await channelsPage.goto();
             await channelsPage.toBeVisible();
 
-            const originalTeamDisplayName = `Original Team ${await pw.random.id()}`;
+            const originalTeamDisplayName = `Original Team ${pw.random.id()}`;
             await createTeamFromUI(channelsPage, originalTeamDisplayName);
 
             const createdTeam = await getTeamByDisplayName(adminClient, originalTeamDisplayName);
@@ -614,7 +631,7 @@ test.describe('Anonymous URLs', () => {
             expectObfuscatedSlug(originalTeamSlug);
 
             // # Rename the team from team settings
-            const renamedTeamDisplayName = `Renamed Team ${await pw.random.id()}`;
+            const renamedTeamDisplayName = `Renamed Team ${pw.random.id()}`;
             const teamSettingsModal = await channelsPage.openTeamSettings();
             const infoTab = await teamSettingsModal.openInfoTab();
             await infoTab.updateName(renamedTeamDisplayName);
@@ -662,11 +679,11 @@ test.describe('Anonymous URLs', () => {
             await channelsPage.goto();
             await channelsPage.toBeVisible();
 
-            const displayName = `Permalink Channel ${await pw.random.id()}`;
+            const displayName = `Permalink Channel ${pw.random.id()}`;
             const channel = await createAnonymousUrlChannel(channelsPage, adminClient, team.name, team.id, displayName);
 
             // # Publish a post that will be opened via permalink
-            const message = `Anonymous permalink message ${await pw.random.id()}`;
+            const message = `Anonymous permalink message ${pw.random.id()}`;
             await channelsPage.postMessage(message);
 
             const lastPost = await channelsPage.getLastPost();
@@ -708,7 +725,7 @@ test.describe('Anonymous URLs', () => {
 
         const createdChannels = [];
         for (let i = 1; i <= 3; i++) {
-            const displayName = `Search Test Channel ${i} ${await pw.random.id()}`;
+            const displayName = `Search Test Channel ${i} ${pw.random.id()}`;
             const channel = await createAnonymousUrlChannel(channelsPage, adminClient, team.name, team.id, displayName);
             createdChannels.push({channel, displayName});
         }
@@ -749,9 +766,9 @@ test.describe('Anonymous URLs', () => {
         await channelsPage.goto();
         await channelsPage.toBeVisible();
 
-        const displayName = `Search Channel ${await pw.random.id()}`;
+        const displayName = `Search Channel ${pw.random.id()}`;
         const channel = await createAnonymousUrlChannel(channelsPage, adminClient, team.name, team.id, displayName);
-        const message = `AnonymousSearchableMessage${await pw.random.id()}`;
+        const message = `AnonymousSearchableMessage${pw.random.id()}`;
         await channelsPage.postMessage(message);
 
         const lastPost = await channelsPage.getLastPost();
@@ -800,7 +817,7 @@ test.describe('Anonymous URLs', () => {
             const createdChannels = [];
 
             for (const template of channelTemplates) {
-                const displayName = `${template} ${(await pw.random.id()).slice(0, 6)}`;
+                const displayName = `${template} ${pw.random.id().slice(0, 6)}`;
                 const channel = await createAnonymousUrlChannel(
                     channelsPage,
                     adminClient,
@@ -871,7 +888,7 @@ test.describe('Anonymous URLs', () => {
             await channelsPage.goto();
             await channelsPage.toBeVisible();
 
-            const displayName = `Calls & Planning 🚀 ${(await pw.random.id()).slice(0, 6)}`;
+            const displayName = `Calls & Planning 🚀 ${pw.random.id().slice(0, 6)}`;
             const channel = await createAnonymousUrlChannel(channelsPage, adminClient, team.name, team.id, displayName);
             await adminClient.addToChannel(adminUser.id, channel.id);
 

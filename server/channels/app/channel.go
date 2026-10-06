@@ -303,6 +303,21 @@ func (a *App) CreateChannel(rctx request.CTX, channel *model.Channel, addMember 
 		a.Srv().Platform().InvalidateChannelCacheForUser(channel.CreatorId)
 	}
 
+	if channel.ManagedCategoryName != "" {
+		if !model.MinimumEnterpriseLicense(a.Channels().License()) || !a.Config().FeatureFlags.ManagedChannelCategories {
+			rctx.Logger().Warn("Managed category update ignored: feature not available")
+			sc.ManagedCategoryName = ""
+		} else {
+			if appErr := a.SetChannelManagedCategory(rctx, sc.Id, channel.ManagedCategoryName); appErr != nil {
+				rctx.Logger().Error("Failed to set managed category on new channel",
+					mlog.String("channel_id", sc.Id),
+					mlog.String("category_name", channel.ManagedCategoryName),
+					mlog.Err(appErr))
+				sc.ManagedCategoryName = ""
+			}
+		}
+	}
+
 	a.Srv().Go(func() {
 		pluginContext := pluginContext(rctx)
 		a.ch.RunMultiHook(func(hooks plugin.Hooks, _ *model.Manifest) bool {
@@ -1313,7 +1328,10 @@ func (a *App) updateChannelMemberRolesInternal(rctx request.CTX, channelID strin
 		}
 
 		if !role.SchemeManaged {
-			// The role is not scheme-managed, so it's OK to apply it to the explicit roles field.
+			if model.IsBuiltInRole(roleName) && !model.IsChannelScopedBuiltInRole(roleName) {
+				err = model.NewAppError("UpdateChannelMemberRoles", "api.channel.update_channel_member_roles.scheme_role.app_error", nil, "role_name="+roleName, http.StatusBadRequest)
+				return nil, err
+			}
 			newExplicitRoles = append(newExplicitRoles, roleName)
 		} else {
 			// The role is scheme-managed, so need to check if it is part of the scheme for this channel or not.
@@ -1333,6 +1351,10 @@ func (a *App) updateChannelMemberRolesInternal(rctx request.CTX, channelID strin
 
 	if member.SchemeUser && member.SchemeGuest {
 		return nil, model.NewAppError("UpdateChannelMemberRoles", "api.channel.update_channel_member_roles.guest_and_user.app_error", nil, "", http.StatusBadRequest)
+	}
+
+	if member.SchemeGuest && member.SchemeAdmin {
+		return nil, model.NewAppError("UpdateChannelMemberRoles", "api.channel.update_channel_member_roles.guest_and_admin.app_error", nil, "", http.StatusBadRequest)
 	}
 
 	if prevSchemeGuestValue != member.SchemeGuest {
@@ -1605,11 +1627,24 @@ func (a *App) DeleteChannel(rctx request.CTX, channel *model.Channel, userID str
 		return err
 	}
 
+	var archiveRejectionReason string
+	pluginContext := pluginContext(rctx)
+	a.ch.RunMultiHook(func(hooks plugin.Hooks, _ *model.Manifest) bool {
+		archiveRejectionReason = hooks.ChannelWillBeArchived(pluginContext, channel)
+		return archiveRejectionReason == ""
+	}, plugin.ChannelWillBeArchivedID)
+
+	if archiveRejectionReason != "" {
+		return model.NewAppError("DeleteChannel", "app.channel.delete_channel.rejected_by_plugin",
+			map[string]any{"Reason": archiveRejectionReason}, "", http.StatusBadRequest)
+	}
+
 	deleteAt := model.GetMillis()
 
 	if err := a.Srv().Store().Channel().Delete(channel.Id, deleteAt); err != nil {
 		return model.NewAppError("DeleteChannel", "app.channel.delete.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
+
 	if user != nil {
 		T := i18n.GetUserTranslations(user.Locale)
 
@@ -1725,16 +1760,10 @@ func (a *App) addUserToChannel(rctx request.CTX, user *model.User, channel *mode
 	if channel.Type == model.ChannelTypePrivate {
 		if ok, appErr := a.ChannelAccessControlled(rctx, channel.Id); ok {
 			if acs := a.Srv().Channels().AccessControl; acs != nil {
-				groupID, err := a.CpaGroupID()
-				if err != nil {
-					return nil, model.NewAppError("AddUserToChannel", "api.channel.add_user.to.channel.failed.app_error", nil,
-						fmt.Sprintf("failed to get group: %v, user_id: %s, channel_id: %s", err, user.Id, channel.Id), http.StatusInternalServerError)
-				}
-
-				s, err := a.Srv().Store().Attributes().GetSubject(rctx, user.Id, groupID)
-				if err != nil {
-					return nil, model.NewAppError("AddUserToChannel", "api.channel.add_user.to.channel.failed.app_error", nil,
-						fmt.Sprintf("failed to get subject: %v, user_id: %s, channel_id: %s", err, user.Id, channel.Id), http.StatusForbidden)
+				s, buildErr := a.BuildAccessControlSubject(rctx, user.Id, user.Roles)
+				if buildErr != nil {
+					return nil, model.NewAppError("AddUserToChannel", "api.channel.add_user.to.channel.abac_subject_build_failed.app_error", nil,
+						fmt.Sprintf("failed to build subject: %v, user_id: %s, channel_id: %s", buildErr, user.Id, channel.Id), http.StatusInternalServerError)
 				}
 
 				decision, evalErr := acs.AccessEvaluation(rctx, model.AccessRequest{
@@ -1743,7 +1772,7 @@ func (a *App) addUserToChannel(rctx request.CTX, user *model.User, channel *mode
 						Type: model.AccessControlPolicyTypeChannel,
 						ID:   channel.Id,
 					},
-					Action: "join_channel",
+					Action: "membership",
 				})
 				if evalErr != nil {
 					return nil, evalErr
@@ -1754,6 +1783,25 @@ func (a *App) addUserToChannel(rctx request.CTX, user *model.User, channel *mode
 		} else if appErr != nil {
 			return nil, appErr
 		}
+	}
+
+	var rejectionReason string
+	pluginContext := pluginContext(rctx)
+	a.ch.RunMultiHook(func(hooks plugin.Hooks, _ *model.Manifest) bool {
+		updatedMember, reason := hooks.ChannelMemberWillBeAdded(pluginContext, newMember)
+		if reason != "" {
+			rejectionReason = reason
+			return false
+		}
+		if updatedMember != nil {
+			newMember = updatedMember
+		}
+		return true
+	}, plugin.ChannelMemberWillBeAddedID)
+
+	if rejectionReason != "" {
+		return nil, model.NewAppError("AddUserToChannel", "app.channel.add_user.to.channel.rejected_by_plugin",
+			map[string]any{"Reason": rejectionReason}, "", http.StatusBadRequest)
 	}
 
 	newMember, nErr = a.Srv().Store().Channel().SaveMember(rctx, newMember)
@@ -1772,7 +1820,7 @@ func (a *App) addUserToChannel(rctx request.CTX, user *model.User, channel *mode
 	// Synchronize membership change for shared channels
 	if channel.IsShared() {
 		if scs := a.Srv().Platform().GetSharedChannelService(); scs != nil {
-			scs.HandleMembershipChange(channel.Id, user.Id, true, user.GetRemoteID())
+			scs.NotifyMembershipChanged(channel.Id, user.GetRemoteID())
 		}
 	}
 
@@ -2748,6 +2796,19 @@ func (a *App) postRemoveFromChannelMessage(rctx request.CTX, removerUserId strin
 	return nil
 }
 
+// removeChannelMembership strips a user's channel membership and the associated
+// thread memberships. Keeping these together ensures channel access cannot be
+// revoked without also dropping the thread state that depends on it.
+func (a *App) removeChannelMembership(rctx request.CTX, userID, channelID, caller string) *model.AppError {
+	if err := a.Srv().Store().Channel().RemoveMember(rctx, channelID, userID); err != nil {
+		return model.NewAppError(caller, "app.channel.remove_member.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+	if err := a.Srv().Store().Thread().DeleteMembershipsForChannel(userID, channelID); err != nil {
+		return model.NewAppError(caller, model.NoTranslation, nil, "failed to delete threadmemberships upon leaving channel", http.StatusInternalServerError).Wrap(err)
+	}
+	return nil
+}
+
 func (a *App) removeUserFromChannel(rctx request.CTX, userIDToRemove string, removerUserId string, channel *model.Channel) *model.AppError {
 	user, nErr := a.Srv().Store().User().Get(context.Background(), userIDToRemove)
 	if nErr != nil {
@@ -2782,14 +2843,11 @@ func (a *App) removeUserFromChannel(rctx request.CTX, userIDToRemove string, rem
 		return err
 	}
 
-	if err := a.Srv().Store().Channel().RemoveMember(rctx, channel.Id, userIDToRemove); err != nil {
-		return model.NewAppError("removeUserFromChannel", "app.channel.remove_member.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	if appErr := a.removeChannelMembership(rctx, userIDToRemove, channel.Id, "removeUserFromChannel"); appErr != nil {
+		return appErr
 	}
 	if err := a.Srv().Store().ChannelMemberHistory().LogLeaveEvent(userIDToRemove, channel.Id, model.GetMillis()); err != nil {
 		return model.NewAppError("removeUserFromChannel", "app.channel_member_history.log_leave_event.internal_error", nil, "", http.StatusInternalServerError).Wrap(err)
-	}
-	if err := a.Srv().Store().Thread().DeleteMembershipsForChannel(userIDToRemove, channel.Id); err != nil {
-		return model.NewAppError("removeUserFromChannel", model.NoTranslation, nil, "failed to delete threadmemberships upon leaving channel", http.StatusInternalServerError).Wrap(err)
 	}
 
 	if isGuest {
@@ -2844,9 +2902,8 @@ func (a *App) removeUserFromChannel(rctx request.CTX, userIDToRemove string, rem
 
 	// Synchronize membership change for shared channels
 	if channel.IsShared() {
-		// isAdd=false, empty remoteId means locally initiated
 		if scs := a.Srv().Platform().GetSharedChannelService(); scs != nil {
-			scs.HandleMembershipChange(channel.Id, userIDToRemove, false, "")
+			scs.NotifyMembershipChanged(channel.Id, "")
 		}
 	}
 
@@ -3080,8 +3137,7 @@ func (a *App) markChannelAsUnreadFromPostCRTUnsupported(rctx request.CTX, postID
 		if mErr != nil {
 			return nil, model.NewAppError("MarkChannelAsUnreadFromPost", "app.channel.update_last_viewed_at_post.app_error", nil, "", http.StatusInternalServerError).Wrap(mErr)
 		}
-		a.sanitizeProfiles(thread.Participants, false)
-		thread.Post.SanitizeProps()
+		a.sanitizeThreadResponse(thread)
 
 		if a.IsCRTEnabledForUser(rctx, userID) {
 			payload, jsonErr := json.Marshal(thread)
@@ -3144,6 +3200,23 @@ func (a *App) AutocompleteChannelsForTeam(rctx request.CTX, teamID, userID, term
 	channelList, err := a.Srv().Store().Channel().AutocompleteInTeam(rctx, teamID, userID, term, includeDeleted, user.IsGuest())
 	if err != nil {
 		return nil, model.NewAppError("AutocompleteChannels", "app.channel.search.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+
+	return channelList, nil
+}
+
+func (a *App) AutocompleteChannelsForTeamFiltered(rctx request.CTX, teamID, userID, term string, privateOnly, excludeGroupConstrained bool) (model.ChannelList, *model.AppError) {
+	includeDeleted := true
+	term = strings.TrimSpace(term)
+
+	user, appErr := a.GetUser(userID)
+	if appErr != nil {
+		return nil, appErr
+	}
+
+	channelList, err := a.Srv().Store().Channel().AutocompleteInTeamFiltered(rctx, teamID, userID, term, includeDeleted, user.IsGuest(), privateOnly, excludeGroupConstrained)
+	if err != nil {
+		return nil, model.NewAppError("AutocompleteChannelsForTeamFiltered", "app.channel.search.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
 	return channelList, nil

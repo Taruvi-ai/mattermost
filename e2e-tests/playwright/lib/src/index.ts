@@ -2,17 +2,77 @@
 // See LICENSE.txt for license information.
 
 export {test, expect, PlaywrightExtended} from './test_fixture';
-export {testConfig} from './test_config';
+export type {ExtendedFixtures} from './test_fixture';
+export {testConfig, resolveAppUrl, TESTCONTAINERS_SERVICE_NAMES} from './test_config';
+export type {TestContainersServiceName} from './test_config';
+export {
+    assertUpgradeFromFreshStart,
+    assertUpgradeToRequiresPriorFromRun,
+    getUpgradeFromServerImage,
+    getUpgradeToServerImage,
+    isUpgradeFromProjectSelected,
+    isUpgradePathProjectSelected,
+    isUpgradeToPhaseProjectSelected,
+    logUpgradeFromServerImage,
+    logUpgradeToServerImage,
+    UPGRADE_FROM_SERVER_IMAGE_ENV,
+} from './upgrade_env';
 export {baseGlobalSetup} from './global_setup';
-export {TestBrowser} from './browser_context';
-export {getBlobFromAsset, getFileFromAsset} from './file';
-export {koreanTestPhrase, typeKoreanWithIme} from './ime';
-export {duration, wait, newTestPassword} from './util';
+export {bindPageToLiveBaseURL, TestBrowser} from './browser_context';
+export {assetPath, getBlobFromAsset, getFileFromAsset, getFileData, getBlobData} from './file';
+export {setupFileServer} from './file_server';
+export {decomposeKorean, koreanTestPhrase, typeHangulCharacterWithIme, typeHangulWithIme} from './ime';
+export {type SizeObservation, type SizeWatcher, watchElementSize} from './layout_shift';
+export {duration, getRandomId, wait, newTestPassword} from './util';
+export {LicenseSkus, appsPluginId, callsPluginId, playbooksPluginId} from './constant';
+
+export {
+    getAdminClient,
+    getOnPremServerConfig,
+    getRecentEmail,
+    extractEmailLink,
+    isWebhookTestServerReachable,
+    setupWebhookTestServer,
+    PlaywrightClient4,
+    generateLdapUser,
+    createLdapUser,
+    updateLdapUser,
+    deleteLdapUser,
+    ldapServerConfig,
+    ensureOpenldap,
+    createKeycloakUser,
+    deleteKeycloakUser,
+    listMinioObjectKeys,
+    ensureMinio,
+    samlServerConfig,
+    ensureKeycloak,
+    elasticsearchServerConfig,
+    opensearchServerConfig,
+    ensureElasticsearch,
+    ensureOpensearch,
+    ensureAzurite,
+    listAzuriteBlobNames,
+    ensureLocalFile,
+    listMattermostDataFiles,
+    ensurePostgresSearch,
+    ensureFeatureFlag,
+    runMmctl,
+    ensureMmctl,
+    upgradeServerImage,
+    saveUpgradePhaseLogs,
+    installAndEnablePlugin,
+    getPluginStatus,
+    isPluginActive,
+} from './server';
+export type {InbucketEmail, LdapUser, KeycloakUser, MmctlResult, UpgradeLogPhase} from './server';
+
+export {startStack, stopStack} from './containers';
 
 export {
     ChannelsPage,
     LandingLoginPage,
     LoginPage,
+    RecapsPage,
     ResetPasswordPage,
     SignupPage,
     ScheduledPostsPage,
@@ -22,6 +82,7 @@ export {
 
 export {
     components,
+    AboutBuildModal,
     GlobalHeader,
     SearchBox,
     ChannelsCenterView,
@@ -59,6 +120,7 @@ export {
     DeletePostConfirmationDialog,
     RestorePostConfirmationDialog,
     ProfileModal,
+    TextInputSetting,
 } from './ui/components';
 
 export {TestArgs, ScreenshotOptions} from './types';
@@ -70,15 +132,21 @@ export {
     disableChannelAutotranslation,
     setUserChannelAutotranslation,
     setMockSourceLanguage,
-    hasAutotranslationLicense,
 } from './autotranslation_helpers';
 export type {EnableAutotranslationOptions} from './autotranslation_helpers';
+export {
+    hasAutotranslationLicense,
+    hasSharedChannelsLicense,
+    hasCustomPermissionsSchemesLicense,
+} from './license_helpers';
 // ABAC (Attribute-Based Access Control) helpers
 export {
     createUserWithAttributes,
     enableABAC,
     disableABAC,
     navigateToABACPage,
+    navigateToPermissionPoliciesPage,
+    navigateToAttributeBasedAccessPage,
     createBasicPolicy,
     createAdvancedPolicy,
     editPolicy,

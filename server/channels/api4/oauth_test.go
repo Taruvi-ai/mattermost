@@ -859,6 +859,50 @@ func TestRegisterOAuthClient_RedirectURIAllowlist(t *testing.T) {
 		assert.NotEmpty(t, dcrErr.ErrorDescription)
 	})
 
+	t.Run("wildcard host cannot be satisfied by query string", func(t *testing.T) {
+		th.App.UpdateConfig(func(cfg *model.Config) {
+			cfg.ServiceSettings.DCRRedirectURIAllowlist = []string{"https://*.example.com/**"}
+		})
+
+		registerRedirectURI := func(redirectURI string) (*http.Response, model.DCRError) {
+			body, _ := json.Marshal(&model.ClientRegistrationRequest{
+				RedirectURIs:            []string{redirectURI},
+				ClientName:              model.NewPointer("Test Client"),
+				TokenEndpointAuthMethod: model.NewPointer(model.ClientAuthMethodNone),
+			})
+			req, err := http.NewRequest(http.MethodPost, client.APIURL+"/oauth/apps/register", bytes.NewReader(body))
+			require.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+
+			httpResp, err := client.HTTPClient.Do(req)
+			require.NoError(t, err)
+
+			var dcrErr model.DCRError
+			if httpResp.StatusCode == http.StatusBadRequest {
+				jsonErr := json.NewDecoder(httpResp.Body).Decode(&dcrErr)
+				require.NoError(t, jsonErr)
+			}
+			require.NoError(t, httpResp.Body.Close())
+
+			return httpResp, dcrErr
+		}
+
+		time.Sleep(time.Second)
+		httpResp, dcrErr := registerRedirectURI("https://attacker.example.net/cb")
+		require.Equal(t, http.StatusBadRequest, httpResp.StatusCode)
+		assert.Equal(t, model.DCRErrorInvalidRedirectURI, dcrErr.Error)
+
+		time.Sleep(time.Second)
+		httpResp, dcrErr = registerRedirectURI("https://attacker.example.net?x=.example.com/cb")
+		require.Equal(t, http.StatusBadRequest, httpResp.StatusCode)
+		assert.Equal(t, model.DCRErrorInvalidRedirectURI, dcrErr.Error)
+
+		time.Sleep(time.Second)
+		httpResp, dcrErr = registerRedirectURI("https://app.example.com/cb")
+		require.Equal(t, http.StatusCreated, httpResp.StatusCode)
+		assert.Empty(t, dcrErr.Error)
+	})
+
 	t.Run("multi redirect partial mismatch rejects request", func(t *testing.T) {
 		th.App.UpdateConfig(func(cfg *model.Config) {
 			cfg.ServiceSettings.DCRRedirectURIAllowlist = []string{"https://allowed.com/**"}
@@ -927,15 +971,10 @@ func TestRegisterOAuthClientAudit(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(logFile.Name())
 
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED", "true")
-	os.Setenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME", logFile.Name())
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILEENABLED")
-	defer os.Unsetenv("MM_EXPERIMENTALAUDITSETTINGS_FILENAME")
-
 	options := []app.Option{app.WithLicense(model.NewTestLicense("advanced_logging"))}
-	th := SetupWithServerOptions(t, options)
-
-	th.App.UpdateConfig(func(cfg *model.Config) {
+	th := SetupWithServerOptionsAndConfig(t, options, func(cfg *model.Config) {
+		cfg.ExperimentalAuditSettings.FileEnabled = model.NewPointer(true)
+		cfg.ExperimentalAuditSettings.FileName = model.NewPointer(logFile.Name())
 		*cfg.ServiceSettings.EnableOAuthServiceProvider = true
 		cfg.ServiceSettings.EnableDynamicClientRegistration = model.NewPointer(true)
 	})

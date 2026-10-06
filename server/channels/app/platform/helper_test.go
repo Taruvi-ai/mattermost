@@ -60,7 +60,15 @@ func (ms *mockSuite) HasPermissionToReadChannel(rctx request.CTX, userID string,
 	return true, true
 }
 
-func (ms *mockSuite) MFARequired(rctx request.CTX) *model.AppError {
+func (ms *mockSuite) HasPermissionToResolveChannelMention(rctx request.CTX, userID string, channel *model.Channel) bool {
+	return true
+}
+
+func (ms *mockSuite) HasPermissionToFileAction(rctx request.CTX, userID string, roles string, channelID string, action string) bool {
+	return true
+}
+
+func (ms *mockSuite) MFARequired(rctx request.CTX, method string) *model.AppError {
 	return nil
 }
 
@@ -147,6 +155,13 @@ func setupTestHelper(dbStore store.Store, dbSettings *model.SqlSettings, enterpr
 
 	memoryConfig := configStore.Get()
 	memoryConfig.SqlSettings = *dbSettings
+	// Disable connection pool cleanup goroutines to prevent DATA RACE with
+	// testify mock argument diffing under the race detector. The sql.DB
+	// connectionCleaner goroutine writes to internal fields while testify's
+	// mock.Called() → Arguments.Diff() → fmt.Sprintf reads them via reflect.
+	// Setting lifetime/idle to 0 prevents the cleaner from starting.
+	memoryConfig.SqlSettings.ConnMaxLifetimeMilliseconds = model.NewPointer(0)
+	memoryConfig.SqlSettings.ConnMaxIdleTimeMilliseconds = model.NewPointer(0)
 	*memoryConfig.PluginSettings.Directory = filepath.Join(tempWorkspace, "plugins")
 	*memoryConfig.PluginSettings.ClientDirectory = filepath.Join(tempWorkspace, "webapp")
 	*memoryConfig.PluginSettings.AutomaticPrepackagedPlugins = false

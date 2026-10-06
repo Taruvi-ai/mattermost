@@ -3413,7 +3413,7 @@ func TestPluginAPICreatePropertyField(t *testing.T) {
 		created, err = api.CreatePropertyField(nil)
 		require.Error(t, err) // Should fail when given nil input
 		assert.Nil(t, created)
-		assert.Contains(t, err.Error(), "invalid input: property field parameter is required")
+		assert.Contains(t, err.Error(), "property field is required")
 	})
 }
 
@@ -3598,6 +3598,49 @@ func TestPluginAPICreateTeamAnonymousURLs(t *testing.T) {
 
 		assert.Equal(t, originalName, createdTeam.Name, "team name should not be overridden")
 	})
+}
+
+func TestPluginAPICreateChannelManagedCategory(t *testing.T) {
+	mainHelper.Parallel(t)
+
+	th := Setup(t).InitBasic(t)
+	th.ConfigStore.SetReadOnlyFF(false)
+	t.Cleanup(func() {
+		th.ConfigStore.SetReadOnlyFF(true)
+	})
+	api := th.SetupPluginAPI()
+
+	th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterprise))
+	defer func() {
+		appErr := th.App.Srv().RemoveLicense()
+		require.Nil(t, appErr)
+	}()
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = true })
+	defer th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.ManagedChannelCategories = false })
+
+	categoryName := "Operations"
+	channel := &model.Channel{
+		DisplayName:         "Plugin channel with managed category",
+		Name:                "plugin-managed-cat-" + model.NewId(),
+		Type:                model.ChannelTypeOpen,
+		TeamId:              th.BasicTeam.Id,
+		ManagedCategoryName: categoryName,
+	}
+
+	createdChannel, appErr := api.CreateChannel(channel)
+	require.Nil(t, appErr)
+	require.NotNil(t, createdChannel)
+	defer func() {
+		_ = th.App.ClearChannelManagedCategory(th.Context, createdChannel.Id)
+	}()
+
+	th.AddUserToChannel(t, th.BasicUser, createdChannel)
+
+	session := &model.Session{UserId: th.BasicUser.Id, Props: model.StringMap{}}
+	rctx := th.Context.WithSession(session)
+	mappings, err := th.App.GetVisibleManagedCategoryMappings(rctx, th.BasicTeam.Id)
+	require.Nil(t, err)
+	assert.Equal(t, categoryName, mappings[createdChannel.Id])
 }
 
 func TestPluginAPICreateChannelAnonymousURLs(t *testing.T) {

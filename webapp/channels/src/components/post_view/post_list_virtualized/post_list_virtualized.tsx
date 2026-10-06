@@ -20,6 +20,7 @@ import ToastWrapper from 'components/toast_wrapper';
 import Pluggable from 'plugins/pluggable';
 import Constants, {PostListRowListIds, EventTypes, PostRequestTypes} from 'utils/constants';
 import DelayedAction from 'utils/delayed_action';
+import {isChannelPopoutWindow} from 'utils/popouts/popout_windows';
 import {getPreviousPostId, getLatestPostId} from 'utils/post_utils';
 import * as Utils from 'utils/utils';
 
@@ -340,13 +341,9 @@ export default class PostList extends React.PureComponent<Props, State> {
         // Since the first in the list is the latest message
         const isLastPost = itemId === this.state.postListIds[0];
 
-        const isLoader = itemId === PostListRowListIds.OLDER_MESSAGES_LOADER || itemId === PostListRowListIds.NEWER_MESSAGES_LOADER;
-        const shouldHideLoader = isLoader && !this.props.loadingOlderPosts && !this.props.loadingNewerPosts;
-        const rowStyle = shouldHideLoader ? {...style, display: 'none'} : style;
-
         return (
             <div
-                style={rowStyle}
+                style={style}
                 className={className}
             >
                 <PostListRow
@@ -439,7 +436,7 @@ export default class PostList extends React.PureComponent<Props, State> {
             });
         }
 
-        if (!this.props.isMobileView && !this.state.isSearchHintDismissed) {
+        if (!this.props.isMobileView && !this.state.isSearchHintDismissed && !isChannelPopoutWindow()) {
             this.setState({
                 showSearchHint: offsetFromBottom > this.showSearchHintThreshold,
             });

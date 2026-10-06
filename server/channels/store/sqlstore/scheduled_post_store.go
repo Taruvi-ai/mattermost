@@ -48,7 +48,6 @@ func baseColumns(prefix string) []string {
 		prefix + "ScheduledAt",
 		prefix + "ProcessedAt",
 		prefix + "ErrorCode",
-		prefix + "Type",
 	}
 }
 

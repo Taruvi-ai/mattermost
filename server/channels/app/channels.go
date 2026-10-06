@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/pkg/errors"
 
@@ -40,7 +41,8 @@ type Channels struct {
 	filestore       filestore.FileBackend
 	exportFilestore filestore.FileBackend
 
-	postActionCookieSecret []byte
+	postActionCookieSecret   []byte
+	samlRelayStateSigningKey []byte
 
 	pluginCommandsLock            sync.RWMutex
 	pluginCommands                []*PluginCommand
@@ -51,12 +53,17 @@ type Channels struct {
 
 	imageProxy *imageproxy.ImageProxy
 
+	agentsBridge AgentsBridge
+
 	// cached counts that are used during notice condition validation
 	cachedPostCount   int64
 	cachedUserCount   int64
 	cachedDBMSVersion string
 	// previously fetched notices
 	cachedNotices model.ProductNotices
+
+	managedCategoryGroupID string
+	managedCategoryFieldID string
 
 	AccountMigration einterfaces.AccountMigrationInterface
 	Compliance       einterfaces.ComplianceInterface
@@ -67,6 +74,9 @@ type Channels struct {
 	Ldap             einterfaces.LdapInterface
 	AccessControl    einterfaces.AccessControlServiceInterface
 	Intune           einterfaces.IntuneInterface
+
+	attributeViewRefreshMut  sync.Mutex
+	attributeViewRefreshLast time.Time
 
 	// These are used to prevent concurrent upload requests
 	// for a given upload session which could cause inconsistencies
@@ -99,6 +109,12 @@ func NewChannels(s *Server) (*Channels, error) {
 		exportFilestore:   s.ExportFileBackend(),
 		cfgSvc:            s.Platform(),
 		interruptQuitChan: make(chan struct{}),
+	}
+
+	if s.agentsBridgeOverride != nil {
+		ch.agentsBridge = s.agentsBridgeOverride
+	} else {
+		ch.agentsBridge = newLiveAgentsBridge(ch)
 	}
 
 	// We are passing a partially filled Channels struct so that the enterprise
@@ -200,7 +216,8 @@ func NewChannels(s *Server) (*Channels, error) {
 		decoderConcurrency = runtime.NumCPU()
 	}
 	ch.imgDecoder, imgErr = imaging.NewDecoder(imaging.DecoderOptions{
-		ConcurrencyLevel: decoderConcurrency,
+		ConcurrencyLevel:     decoderConcurrency,
+		MaxDecodedResolution: *ch.cfgSvc.Config().FileSettings.MaxImageResolution,
 	})
 	if imgErr != nil {
 		return nil, errors.Wrap(imgErr, "failed to create image decoder")
@@ -219,6 +236,10 @@ func NewChannels(s *Server) (*Channels, error) {
 	pluginsRoute.HandleFunc("/{anything:.*}", ch.ServePluginRequest)
 
 	return ch, nil
+}
+
+func (ch *Channels) SetAgentsBridge(bridge AgentsBridge) {
+	ch.agentsBridge = bridge
 }
 
 func (ch *Channels) Start() error {
@@ -275,6 +296,10 @@ func (ch *Channels) Start() error {
 
 	if err := ch.ensurePostActionCookieSecret(); err != nil {
 		return errors.Wrapf(err, "unable to ensure PostAction cookie secret")
+	}
+
+	if err := ch.ensureSamlRelayStateSigningKey(); err != nil {
+		return errors.Wrapf(err, "unable to ensure SAML RelayState signing key")
 	}
 
 	return nil

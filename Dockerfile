@@ -1,5 +1,5 @@
 # Stage 1: Build server from source
-FROM golang:1.25 AS builder
+FROM golang:1.26 AS builder
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Build tools for server
@@ -20,7 +20,7 @@ FROM ubuntu:noble-20251013@sha256:c35e29c9450151419d9448b0fd75374fec4fff364a27f1
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # Must match the server version built from this repo (server/public/model/version.go)
-ARG MM_PACKAGE="https://releases.mattermost.com/11.6.1/mattermost-enterprise-11.6.1-linux-amd64.tar.gz"
+ARG MM_PACKAGE="https://releases.mattermost.com/11.7.11/mattermost-enterprise-11.7.11-linux-amd64.tar.gz"
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y \

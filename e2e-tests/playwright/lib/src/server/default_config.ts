@@ -3,14 +3,16 @@
 
 import merge from 'deepmerge';
 import {
+    AccessControlSettings,
     AdminConfig,
+    AnnouncementSettings,
+    AutoTranslationSettings,
     ClusterSettings,
     CollapsedThreads,
     EmailSettings,
     ExperimentalSettings,
     LogSettings,
     PasswordSettings,
-    PluginSettings,
     ServiceSettings,
     TeamSettings,
 } from '@mattermost/types/config';
@@ -25,20 +27,45 @@ export function mergeWithOnPremServerConfig(overrides: Partial<AdminConfig>): Ad
     return merge<AdminConfig>(getOnPremServerConfig(), overrides);
 }
 
+/** Live-reloadable on-prem overrides only — safe for patchConfig (no restart-required keys). */
+export function getOnPremServerConfigPatch(): Partial<AdminConfig> {
+    return onPremServerConfig() as Partial<AdminConfig>;
+}
+
 type TestAdminConfig = {
+    AccessControlSettings: Partial<AccessControlSettings>;
+    AnnouncementSettings: Partial<AnnouncementSettings>;
+    AutoTranslationSettings: Partial<AutoTranslationSettings>;
     ClusterSettings: Partial<ClusterSettings>;
     EmailSettings: Partial<EmailSettings>;
     ExperimentalSettings: Partial<ExperimentalSettings>;
     LogSettings: Partial<LogSettings>;
     PasswordSettings: Partial<PasswordSettings>;
-    PluginSettings: Partial<PluginSettings>;
     ServiceSettings: Partial<ServiceSettings>;
     TeamSettings: Partial<TeamSettings>;
 };
 
-// On-prem setting that is different from the default
+// On-prem setting that is different from the default.
+//
+// Carries no PluginSettings: patchConfig replaces the PluginStates map wholesale, which would
+// clobber the plugins a running spec enabled. Specs enable and disable plugins per id instead.
 const onPremServerConfig = (): Partial<TestAdminConfig> => {
     return {
+        AccessControlSettings: {
+            EnableAttributeBasedAccessControl: true,
+            EnableUserManagedAttributes: true,
+        },
+        AnnouncementSettings: {
+            // An in-product notice opens a modal over the channel view and swallows clicks near it.
+            AdminNoticesEnabled: false,
+            UserNoticesEnabled: false,
+        },
+        AutoTranslationSettings: {
+            // Channel autotranslation specs enable this via updateConfig. initSetup used to
+            // reset it with a full snapshot; patchConfig must restore Enable:false or later
+            // Localization specs click the already-on toggle off and miss Providerdropdown.
+            Enable: false,
+        },
         ClusterSettings: {
             Enable: testConfig.haClusterEnabled,
             ClusterName: testConfig.haClusterName,
@@ -57,22 +84,13 @@ const onPremServerConfig = (): Partial<TestAdminConfig> => {
             Symbol: false,
             EnableForgotLink: true,
         },
-        PluginSettings: {
-            EnableUploads: true,
-            PluginStates: {
-                'com.mattermost.calls': {
-                    Enable: false,
-                },
-                'com.mattermost.nps': {
-                    Enable: false,
-                },
-                playbooks: {
-                    Enable: true,
-                },
-            },
-        },
         ServiceSettings: {
-            SiteURL: testConfig.baseURL,
+            // SiteURL is the server's own view of itself (e.g. for building plugin callback
+            // URLs), so it must use an address the server can reach itself with. In `testcontainers` mode
+            // testConfig.baseURL is a host-mapped port the server's own container can't reach;
+            // internalBaseURL is the Docker network alias there, and the same as baseURL in
+            // `external` mode — correct in both cases.
+            SiteURL: testConfig.internalBaseURL,
             EnableOnboardingFlow: false,
             EnableSecurityFixAlert: false,
             GiphySdkKey: 's0glxvzVg9azvPipKxcPLpXV0q1x1fVP',
@@ -86,7 +104,7 @@ const onPremServerConfig = (): Partial<TestAdminConfig> => {
 };
 
 // Should be based only from the generated default config from ./server via "make config-reset"
-// Based on v11.4 server
+// Based on v11.7 server
 const defaultServerConfig: AdminConfig = {
     ServiceSettings: {
         SiteURL: '',
@@ -175,6 +193,7 @@ const defaultServerConfig: AdminConfig = {
         EnableAPIUserDeletion: false,
         EnableAPIPostDeletion: false,
         EnableDesktopLandingPage: true,
+        MinimumDesktopAppVersion: '',
         ExperimentalEnableHardenedMode: false,
         ExperimentalStrictCSRFEnforcement: false,
         EnableEmailInvitations: false,
@@ -214,7 +233,6 @@ const defaultServerConfig: AdminConfig = {
         EnableWebHubChannelIteration: false,
         FrameAncestors: '',
         DeleteAccountLink: '',
-        MinimumDesktopAppVersion: '',
     },
     TeamSettings: {
         SiteName: 'Mattermost',
@@ -249,7 +267,7 @@ const defaultServerConfig: AdminConfig = {
     SqlSettings: {
         DriverName: 'postgres',
         DataSource:
-            'postgres://mmuser:mostest@localhost/mattermost_test?sslmode=disable\u0026connect_timeout=10\u0026binary_parameters=yes',
+            'postgres://mmuser:mostest_password@localhost/mattermost_test?sslmode=disable\u0026connect_timeout=10\u0026binary_parameters=yes',
         DataSourceReplicas: [],
         DataSourceSearchReplicas: [],
         MaxIdleConns: 50,
@@ -259,6 +277,7 @@ const defaultServerConfig: AdminConfig = {
         Trace: false,
         AtRestEncryptKey: '',
         QueryTimeout: 30,
+        AnalyticsQueryTimeout: 300,
         DisableDatabaseSearch: false,
         MigrationsStatementTimeoutSeconds: 100000,
         ReplicaLagSettings: [],
@@ -304,6 +323,7 @@ const defaultServerConfig: AdminConfig = {
         Directory: './data/',
         EnablePublicLink: false,
         ExtractContent: true,
+        ExtractContentTimeout: 10,
         ArchiveRecursion: false,
         PublicLinkSalt: '',
         InitialFont: 'nunito-bold.ttf',
@@ -430,6 +450,7 @@ const defaultServerConfig: AdminConfig = {
         DiscoveryEndpoint: '',
         ButtonText: '',
         ButtonColor: '',
+        UsePreferredUsername: false,
     },
     GoogleSettings: {
         Enable: false,
@@ -443,6 +464,7 @@ const defaultServerConfig: AdminConfig = {
         DiscoveryEndpoint: '',
         ButtonText: '',
         ButtonColor: '',
+        UsePreferredUsername: false,
     },
     Office365Settings: {
         Enable: false,
@@ -454,6 +476,7 @@ const defaultServerConfig: AdminConfig = {
         UserAPIEndpoint: 'https://graph.microsoft.com/v1.0/me',
         DiscoveryEndpoint: '',
         DirectoryId: '',
+        UsePreferredUsername: false,
     },
     OpenIdSettings: {
         Enable: false,
@@ -466,6 +489,7 @@ const defaultServerConfig: AdminConfig = {
         DiscoveryEndpoint: '',
         ButtonText: '',
         ButtonColor: '#145DBF',
+        UsePreferredUsername: false,
     },
     LdapSettings: {
         Enable: false,
@@ -614,6 +638,7 @@ const defaultServerConfig: AdminConfig = {
         UsersStatusAndProfileFetchingPollIntervalMilliseconds: 3000,
         YoutubeReferrerPolicy: false,
         ExperimentalChannelCategorySorting: false,
+        EnableWatermark: false,
     },
     AnalyticsSettings: {
         MaxUsersForStatistics: 2500,
@@ -771,14 +796,18 @@ const defaultServerConfig: AdminConfig = {
         ExperimentalAuditSettingsSystemConsoleUI: true,
         CustomProfileAttributes: true,
         AttributeBasedAccessControl: true,
+        PermissionPolicies: false,
         ContentFlagging: true,
         InteractiveDialogAppsForm: true,
         EnableMattermostEntry: true,
-        MobileSSOCodeExchange: true,
-        AutoTranslation: false,
+        MobileSSOCodeExchange: false,
+        AutoTranslation: true,
         BurnOnRead: true,
         EnableAIPluginBridge: false,
         EnableAIRecaps: false,
+        IntegratedBoards: false,
+        CJKSearch: false,
+        ManagedChannelCategories: false,
     },
     ImportSettings: {
         Directory: './import',
@@ -844,9 +873,10 @@ const defaultServerConfig: AdminConfig = {
     },
     AutoTranslationSettings: {
         Enable: false,
+        RestrictDMAndGM: false,
         Provider: '',
         TargetLanguages: ['en'],
-        Workers: 4,
+        Workers: 6,
         TimeoutMs: 5000,
         LibreTranslate: {
             URL: '',
@@ -855,6 +885,5 @@ const defaultServerConfig: AdminConfig = {
         Agents: {
             LLMServiceID: '',
         },
-        RestrictDMAndGM: false,
     },
 };

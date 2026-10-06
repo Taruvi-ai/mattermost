@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -714,6 +715,160 @@ func TestPostChannelMentions(t *testing.T) {
 	assert.Nil(t, result.GetProp(model.PostPropsChannelMentions))
 }
 
+// TestFillInPostPropsChannelMentionResolution locks in the author-side persistence of the
+// channel_mentions prop after FillInPostProps switched from HasPermissionToReadChannel to
+// HasPermissionToResolveChannelMention. The post author is the subject of every case.
+func TestFillInPostPropsChannelMentionResolution(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	// Author is a member of BasicTeam (and BasicChannel) but NOT of the referenced channels below.
+	author := th.BasicUser
+	postChannel := th.BasicChannel
+
+	// Public channel on the author's team where the author is NOT a member.
+	// Created with membership=false so the creator is not added as a member.
+	publicNonMember, err := th.App.CreateChannel(th.Context, &model.Channel{
+		DisplayName: "Public Non-Member",
+		Name:        "public-non-member-" + model.NewId(),
+		Type:        model.ChannelTypeOpen,
+		TeamId:      th.BasicTeam.Id,
+	}, false)
+	require.Nil(t, err)
+
+	// Private channel on the author's team where the author is NOT a member.
+	privateNonMember, err := th.App.CreateChannel(th.Context, &model.Channel{
+		DisplayName: "Private Non-Member",
+		Name:        "private-non-member-" + model.NewId(),
+		Type:        model.ChannelTypePrivate,
+		TeamId:      th.BasicTeam.Id,
+	}, false)
+	require.Nil(t, err)
+
+	// Public channel on the author's team where the author IS a member.
+	publicMember, err := th.App.CreateChannel(th.Context, &model.Channel{
+		DisplayName: "Public Member",
+		Name:        "public-member-" + model.NewId(),
+		Type:        model.ChannelTypeOpen,
+		TeamId:      th.BasicTeam.Id,
+	}, false)
+	require.Nil(t, err)
+	_, err = th.App.AddUserToChannel(th.Context, author, publicMember, false)
+	require.Nil(t, err)
+
+	// A second team the author does NOT belong to, with a public channel on it. The post used for
+	// the cross-team case lives on this team so that GetChannelsByNames (scoped to the post's team)
+	// actually resolves the channel and the permission check is what drops it.
+	otherTeam := th.CreateTeam(t)
+	otherTeamPublic, err := th.App.CreateChannel(th.Context, &model.Channel{
+		DisplayName: "Other Team Public",
+		Name:        "other-team-public-" + model.NewId(),
+		Type:        model.ChannelTypeOpen,
+		TeamId:      otherTeam.Id,
+	}, false)
+	require.Nil(t, err)
+	otherTeamPostChannel, err := th.App.CreateChannel(th.Context, &model.Channel{
+		DisplayName: "Other Team Post Channel",
+		Name:        "other-team-post-" + model.NewId(),
+		Type:        model.ChannelTypeOpen,
+		TeamId:      otherTeam.Id,
+	}, false)
+	require.Nil(t, err)
+
+	setCompliance := func(enabled bool) {
+		th.App.UpdateConfig(func(c *model.Config) {
+			c.ComplianceSettings.Enable = model.NewPointer(enabled)
+		})
+	}
+
+	// resolve runs FillInPostProps for a post authored by `author` mentioning the given channels in
+	// `inChannel`, and returns the persisted channel_mentions map (or nil).
+	resolve := func(t *testing.T, inChannel *model.Channel, mentioned ...*model.Channel) map[string]any {
+		t.Helper()
+		var builder strings.Builder
+		builder.WriteString("hello")
+		for _, m := range mentioned {
+			fmt.Fprintf(&builder, " ~%s", m.Name)
+		}
+		message := builder.String()
+		post := &model.Post{
+			Message:   message,
+			ChannelId: inChannel.Id,
+			UserId:    author.Id,
+		}
+		appErr := th.App.FillInPostProps(th.Context, post, inChannel)
+		require.Nil(t, appErr)
+
+		prop := post.GetProp(model.PostPropsChannelMentions)
+		if prop == nil {
+			return nil
+		}
+		mentions, ok := prop.(map[string]any)
+		require.True(t, ok)
+		return mentions
+	}
+
+	assertResolved := func(t *testing.T, mentions map[string]any, channel *model.Channel, teamName string) {
+		t.Helper()
+		require.Contains(t, mentions, channel.Name)
+		entry, ok := mentions[channel.Name].(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, channel.DisplayName, entry["display_name"])
+		assert.Equal(t, teamName, entry["team_name"])
+	}
+
+	t.Run("public channel, author is a team member but not a channel member, compliance ON => persisted", func(t *testing.T) {
+		setCompliance(true)
+		defer setCompliance(false)
+
+		mentions := resolve(t, postChannel, publicNonMember)
+		require.NotNil(t, mentions, "channel_mentions prop must be persisted under compliance")
+		assertResolved(t, mentions, publicNonMember, th.BasicTeam.Name)
+	})
+
+	t.Run("public channel, author is a team member but not a channel member, compliance OFF => persisted", func(t *testing.T) {
+		setCompliance(false)
+
+		mentions := resolve(t, postChannel, publicNonMember)
+		require.NotNil(t, mentions)
+		assertResolved(t, mentions, publicNonMember, th.BasicTeam.Name)
+	})
+
+	t.Run("public channel on a team the author does not belong to => not persisted", func(t *testing.T) {
+		setCompliance(false)
+
+		mentions := resolve(t, otherTeamPostChannel, otherTeamPublic)
+		assert.Nil(t, mentions)
+	})
+
+	t.Run("private channel the author is not a member of => not persisted", func(t *testing.T) {
+		setCompliance(false)
+
+		mentions := resolve(t, postChannel, privateNonMember)
+		assert.Nil(t, mentions)
+	})
+
+	t.Run("channel the author is a member of => persisted", func(t *testing.T) {
+		setCompliance(true)
+		defer setCompliance(false)
+
+		mentions := resolve(t, postChannel, publicMember)
+		require.NotNil(t, mentions)
+		assertResolved(t, mentions, publicMember, th.BasicTeam.Name)
+	})
+
+	t.Run("mixed mentions resolve per-channel boundary", func(t *testing.T) {
+		setCompliance(true)
+		defer setCompliance(false)
+
+		mentions := resolve(t, postChannel, publicNonMember, privateNonMember, publicMember)
+		require.NotNil(t, mentions)
+		assertResolved(t, mentions, publicNonMember, th.BasicTeam.Name)
+		assertResolved(t, mentions, publicMember, th.BasicTeam.Name)
+		assert.NotContains(t, mentions, privateNonMember.Name)
+	})
+}
+
 func TestImageProxy(t *testing.T) {
 	mainHelper.Parallel(t)
 	th := SetupWithStoreMock(t)
@@ -953,7 +1108,9 @@ func TestDeletePostInArchivedChannel(t *testing.T) {
 }
 
 func TestCreatePost(t *testing.T) {
-	mainHelper.Parallel(t)
+	// This test is intentionally not parallel: two subtests below call t.Setenv
+	// to pin MM_FEATUREFLAGS_EnableSharedChannelsDMs, which Go disallows under a
+	// parallel ancestor.
 	t.Run("call PreparePostForClient before returning", func(t *testing.T) {
 		mainHelper.Parallel(t)
 		th := Setup(t).InitBasic(t)
@@ -1173,7 +1330,10 @@ func TestCreatePost(t *testing.T) {
 	})
 
 	t.Run("Should not allow to create posts on shared DMs", func(t *testing.T) {
-		mainHelper.Parallel(t)
+		// The env override is reapplied on every config Set, so UpdateConfig cannot
+		// pin the flag; t.Setenv is the only safe way (and requires no parallel ancestor).
+		t.Setenv("MM_FEATUREFLAGS_EnableSharedChannelsDMs", "false")
+
 		th := setupSharedChannels(t).InitBasic(t)
 
 		user1 := th.CreateUser(t)
@@ -1212,7 +1372,10 @@ func TestCreatePost(t *testing.T) {
 	})
 
 	t.Run("Should not allow to create posts on shared GMs", func(t *testing.T) {
-		mainHelper.Parallel(t)
+		// The env override is reapplied on every config Set, so UpdateConfig cannot
+		// pin the flag; t.Setenv is the only safe way (and requires no parallel ancestor).
+		t.Setenv("MM_FEATUREFLAGS_EnableSharedChannelsDMs", "false")
+
 		th := setupSharedChannels(t).InitBasic(t)
 
 		user1 := th.CreateUser(t)
@@ -1335,12 +1498,29 @@ func TestCreatePost(t *testing.T) {
 		require.NotEmpty(t, createdPost.GetProp(model.PostPropsForceNotification))
 	})
 
-	t.Run("Should remove post file IDs for burn on read posts", func(t *testing.T) {
-		os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-		t.Cleanup(func() {
-			os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-		})
+	t.Run("creates post with type card", func(t *testing.T) {
+		mainHelper.Parallel(t)
 		th := Setup(t).InitBasic(t)
+
+		post := &model.Post{
+			ChannelId: th.BasicChannel.Id,
+			UserId:    th.BasicUser.Id,
+			Message:   "card post",
+			Type:      model.PostTypeCard,
+		}
+
+		rpost, _, appErr := th.App.CreatePost(th.Context, post, th.BasicChannel, model.CreatePostFlags{})
+		require.Nil(t, appErr)
+		require.NotNil(t, rpost)
+		assert.Equal(t, model.PostTypeCard, rpost.Type)
+		assert.Equal(t, "card post", rpost.Message)
+	})
+
+	t.Run("Should remove post file IDs for burn on read posts", func(t *testing.T) {
+		th := Setup(t).InitBasic(t)
+
+		// Enable BurnOnRead feature flag
+		th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 		enableBoRFeature(th)
 
 		post := &model.Post{
@@ -1354,6 +1534,70 @@ func TestCreatePost(t *testing.T) {
 		createdPost, _, appErr := th.App.CreatePost(th.Context, post, th.BasicChannel, model.CreatePostFlags{})
 		require.Nil(t, appErr)
 		require.Empty(t, createdPost.FileIds)
+	})
+
+	t.Run("should reject burn-on-read posts in shared channels", func(t *testing.T) {
+		os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
+		t.Cleanup(func() {
+			os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
+		})
+		th := setupSharedChannels(t).InitBasic(t)
+		enableBoRFeature(th)
+
+		channel := th.CreateChannel(t, th.BasicTeam)
+
+		sc := &model.SharedChannel{
+			ChannelId: channel.Id,
+			TeamId:    th.BasicTeam.Id,
+			Type:      channel.Type,
+			Home:      true,
+			ShareName: "shared-bor-test",
+			CreatorId: th.BasicUser.Id,
+			RemoteId:  model.NewId(),
+		}
+		_, scErr := th.Server.Store().SharedChannel().Save(sc)
+		require.NoError(t, scErr)
+
+		channel.Shared = model.NewPointer(true)
+		_, err := th.Server.Store().Channel().Update(th.Context, channel)
+		require.NoError(t, err)
+
+		post := &model.Post{
+			ChannelId: channel.Id,
+			UserId:    th.BasicUser.Id,
+			Message:   "burn-on-read in shared channel",
+			Type:      model.PostTypeBurnOnRead,
+		}
+
+		createdPost, _, appErr := th.App.CreatePost(th.Context, post, channel, model.CreatePostFlags{SetOnline: true})
+		require.NotNil(t, appErr)
+		require.Nil(t, createdPost)
+		require.Equal(t, "api.post.fill_in_post_props.burn_on_read.shared_channel.app_error", appErr.Id)
+		require.Equal(t, http.StatusBadRequest, appErr.StatusCode)
+	})
+
+	t.Run("should allow burn-on-read posts in non-shared channels", func(t *testing.T) {
+		os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
+		t.Cleanup(func() {
+			os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
+		})
+		th := Setup(t).InitBasic(t)
+		enableBoRFeature(th)
+
+		channel := th.CreateChannel(t, th.BasicTeam)
+		require.False(t, channel.IsShared())
+
+		post := &model.Post{
+			ChannelId: channel.Id,
+			UserId:    th.BasicUser.Id,
+			Message:   "burn-on-read in non-shared channel",
+			Type:      model.PostTypeBurnOnRead,
+		}
+
+		createdPost, _, appErr := th.App.CreatePost(th.Context, post, channel, model.CreatePostFlags{SetOnline: true})
+		require.Nil(t, appErr)
+		require.NotNil(t, createdPost)
+		require.Equal(t, model.PostTypeBurnOnRead, createdPost.Type)
 	})
 }
 
@@ -2152,6 +2396,7 @@ func TestSearchPostsForUser(t *testing.T) {
 		es.On("SearchPosts", mock.Anything, mock.Anything, page, perPage).Return(resultsPage, nil, nil)
 		es.On("Start").Return(nil).Maybe()
 		es.On("IsActive").Return(true)
+		es.On("IsHealthy").Return(true)
 		es.On("IsSearchEnabled").Return(true)
 		th.App.Srv().Platform().SearchEngine.ElasticsearchEngine = es
 		defer func() {
@@ -2180,6 +2425,7 @@ func TestSearchPostsForUser(t *testing.T) {
 		es.On("SearchPosts", mock.Anything, mock.Anything, page, perPage).Return(resultsPage, nil, nil)
 		es.On("Start").Return(nil).Maybe()
 		es.On("IsActive").Return(true)
+		es.On("IsHealthy").Return(true)
 		es.On("IsSearchEnabled").Return(true)
 		th.App.Srv().Platform().SearchEngine.ElasticsearchEngine = es
 		defer func() {
@@ -2205,6 +2451,7 @@ func TestSearchPostsForUser(t *testing.T) {
 		es.On("GetName").Return("mock")
 		es.On("Start").Return(nil).Maybe()
 		es.On("IsActive").Return(true)
+		es.On("IsHealthy").Return(true)
 		es.On("IsSearchEnabled").Return(true)
 		th.App.Srv().Platform().SearchEngine.ElasticsearchEngine = es
 		defer func() {
@@ -2238,6 +2485,7 @@ func TestSearchPostsForUser(t *testing.T) {
 		es.On("GetName").Return("mock")
 		es.On("Start").Return(nil).Maybe()
 		es.On("IsActive").Return(true)
+		es.On("IsHealthy").Return(true)
 		es.On("IsSearchEnabled").Return(true)
 		th.App.Srv().Platform().SearchEngine.ElasticsearchEngine = es
 		defer func() {
@@ -4530,13 +4778,11 @@ func TestValidateMoveOrCopy(t *testing.T) {
 }
 
 func TestPermanentDeletePost(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-	t.Cleanup(func() {
-		os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-	})
-
 	mainHelper.Parallel(t)
 	th := Setup(t).InitBasic(t)
+
+	// Enable BurnOnRead feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 
 	t.Run("should permanently delete a post and its file attachment", func(t *testing.T) {
 		// Create a post with a file attachment.
@@ -4737,6 +4983,76 @@ func TestPermanentDeletePost(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			require.Fail(t, "Did not receive websocket message in time")
 		}
+	})
+}
+
+func TestCleanUpAfterPostDeletion(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	appErr := th.App.JoinChannel(th.Context, th.BasicChannel, th.BasicUser.Id)
+	require.Nil(t, appErr)
+	appErr = th.App.JoinChannel(th.Context, th.BasicChannel, th.BasicUser2.Id)
+	require.Nil(t, appErr)
+
+	waitForPostDeleted := func(t *testing.T, messages chan *model.WebSocketEvent) *model.WebSocketEvent {
+		t.Helper()
+
+		select {
+		case received := <-messages:
+			return received
+		case <-time.After(10 * time.Second):
+			require.Fail(t, "Did not receive websocket message in time")
+			return nil
+		}
+	}
+
+	t.Run("post_deleted broadcast to channel members strips action integrations", func(t *testing.T) {
+		post, _, appErr := th.App.CreatePost(th.Context, &model.Post{
+			UserId:    th.BasicUser.Id,
+			ChannelId: th.BasicChannel.Id,
+			Message:   "interactive message",
+			Props: model.StringInterface{
+				model.PostPropsAttachments: []*model.MessageAttachment{
+					{
+						Text: "hello",
+						Actions: []*model.PostAction{
+							{
+								Type: model.PostActionTypeButton,
+								Name: "action",
+								Integration: &model.PostActionIntegration{
+									URL:     "http://localhost:8065/secret-endpoint",
+									Context: map[string]any{"secret_marker": "s3cr3t"},
+								},
+							},
+						},
+					},
+				},
+			},
+		}, th.BasicChannel, model.CreatePostFlags{})
+		require.Nil(t, appErr)
+
+		memberMessages, closeMemberWS := connectFakeWebSocket(t, th, th.BasicUser2.Id, "", []model.WebsocketEventType{model.WebsocketEventPostDeleted})
+		defer closeMemberWS()
+
+		_, appErr = th.App.DeletePost(th.Context, post.Id, th.BasicUser.Id)
+		require.Nil(t, appErr)
+
+		memberEvent := waitForPostDeleted(t, memberMessages)
+		memberPostJSON, ok := memberEvent.GetData()["post"].(string)
+		require.True(t, ok)
+		assert.NotContains(t, memberPostJSON, "secret-endpoint")
+		assert.NotContains(t, memberPostJSON, "secret_marker")
+		assert.Nil(t, memberEvent.GetData()["delete_by"])
+
+		var memberPost model.Post
+		require.NoError(t, json.Unmarshal([]byte(memberPostJSON), &memberPost))
+		require.Equal(t, post.Id, memberPost.Id)
+		memberAttachments := memberPost.Attachments()
+		require.Len(t, memberAttachments, 1)
+		require.Len(t, memberAttachments[0].Actions, 1)
+		assert.Equal(t, "action", memberAttachments[0].Actions[0].Name, "non-secret attachment data must be preserved")
+		assert.Nil(t, memberAttachments[0].Actions[0].Integration)
 	})
 }
 
@@ -5009,12 +5325,10 @@ func TestFilterPostsByChannelPermissions(t *testing.T) {
 }
 
 func TestRevealPost(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-	t.Cleanup(func() {
-		os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-	})
-
 	th := Setup(t).InitBasic(t)
+
+	// Enable BurnOnRead feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 
 	// Helper to create a burn-on-read post
 	createBurnOnReadPost := func() *model.Post {
@@ -5266,12 +5580,10 @@ func TestRevealPost(t *testing.T) {
 }
 
 func TestBurnPost(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-	t.Cleanup(func() {
-		os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-	})
-
 	th := Setup(t).InitBasic(t)
+
+	// Enable BurnOnRead feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 
 	// feature flag, configuration and license is not checked for this feature
 	// so we set these to enable the feature to create a burn on read post
@@ -5386,12 +5698,10 @@ func TestBurnPost(t *testing.T) {
 }
 
 func TestGetFlaggedPostsWithExpiredBurnOnRead(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-	t.Cleanup(func() {
-		os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-	})
-
 	th := Setup(t).InitBasic(t)
+
+	// Enable BurnOnRead feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 
 	// Create a second user for testing
 	user2 := th.CreateUser(t)
@@ -5581,12 +5891,10 @@ func TestGetFlaggedPostsWithExpiredBurnOnRead(t *testing.T) {
 }
 
 func TestBurnOnReadRestrictionsForDMsAndBots(t *testing.T) {
-	os.Setenv("MM_FEATUREFLAGS_BURNONREAD", "true")
-	defer func() {
-		os.Unsetenv("MM_FEATUREFLAGS_BURNONREAD")
-	}()
-
 	th := Setup(t).InitBasic(t)
+
+	// Enable BurnOnRead feature flag
+	th.App.UpdateConfig(func(cfg *model.Config) { cfg.FeatureFlags.BurnOnRead = true })
 
 	th.App.Srv().SetLicense(model.NewTestLicenseSKU(model.LicenseShortSkuEnterpriseAdvanced))
 
@@ -5901,4 +6209,105 @@ func TestPostChannelMentionsWithPrivateChannels(t *testing.T) {
 
 	// Should include public channel (user has team access)
 	assert.Contains(t, mentionsMap, publicChannel.Name)
+}
+
+func TestGetPostsForView(t *testing.T) {
+	mainHelper.Parallel(t)
+
+	t.Run("returns posts for channel", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		// Create a few posts
+		post1, _, err := th.App.CreatePost(th.Context, &model.Post{
+			ChannelId: th.BasicChannel.Id,
+			UserId:    th.BasicUser.Id,
+			Message:   "post 1",
+		}, th.BasicChannel, model.CreatePostFlags{})
+		require.Nil(t, err)
+
+		post2, _, err := th.App.CreatePost(th.Context, &model.Post{
+			ChannelId: th.BasicChannel.Id,
+			UserId:    th.BasicUser.Id,
+			Message:   "post 2",
+		}, th.BasicChannel, model.CreatePostFlags{})
+		require.Nil(t, err)
+
+		options := model.GetPostsOptions{
+			ChannelId: th.BasicChannel.Id,
+			Page:      0,
+			PerPage:   10,
+			UserId:    th.BasicUser.Id,
+		}
+
+		postList, appErr := th.App.GetPostsForView(th.Context, options)
+		require.Nil(t, appErr)
+		require.NotNil(t, postList)
+		assert.Contains(t, postList.Posts, post1.Id)
+		assert.Contains(t, postList.Posts, post2.Id)
+	})
+
+	t.Run("returns empty list for channel with no posts", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		channel := th.CreateChannel(t, th.BasicTeam)
+
+		options := model.GetPostsOptions{
+			ChannelId: channel.Id,
+			Page:      0,
+			PerPage:   10,
+			UserId:    th.BasicUser.Id,
+		}
+
+		postList, appErr := th.App.GetPostsForView(th.Context, options)
+		require.Nil(t, appErr)
+		require.NotNil(t, postList)
+		assert.Empty(t, postList.Posts)
+	})
+
+	t.Run("respects pagination", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		channel := th.CreateChannel(t, th.BasicTeam)
+
+		for i := range 5 {
+			_, _, err := th.App.CreatePost(th.Context, &model.Post{
+				ChannelId: channel.Id,
+				UserId:    th.BasicUser.Id,
+				Message:   fmt.Sprintf("post %d", i),
+			}, channel, model.CreatePostFlags{})
+			require.Nil(t, err)
+		}
+
+		options := model.GetPostsOptions{
+			ChannelId: channel.Id,
+			Page:      0,
+			PerPage:   2,
+			UserId:    th.BasicUser.Id,
+		}
+
+		postList, appErr := th.App.GetPostsForView(th.Context, options)
+		require.Nil(t, appErr)
+		require.NotNil(t, postList)
+		assert.Len(t, postList.Posts, 2)
+	})
+
+	t.Run("invalid channel id returns error", func(t *testing.T) {
+		mainHelper.Parallel(t)
+		th := Setup(t).InitBasic(t)
+
+		options := model.GetPostsOptions{
+			ChannelId: model.NewId(),
+			Page:      0,
+			PerPage:   10,
+			UserId:    th.BasicUser.Id,
+		}
+
+		postList, appErr := th.App.GetPostsForView(th.Context, options)
+		require.Nil(t, appErr)
+		require.NotNil(t, postList)
+		assert.Empty(t, postList.Posts)
+	})
 }

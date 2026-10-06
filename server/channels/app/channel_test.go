@@ -599,9 +599,7 @@ func TestGetOrCreateDirectChannel(t *testing.T) {
 	})
 
 	t.Run("Cannot create with a remote user", func(t *testing.T) {
-		user2.RemoteId = model.NewPointer(model.NewId())
-		_, appErr := th.App.UpdateUser(th.Context, user2, false)
-		require.Nil(t, appErr)
+		th.SetUserRemoteID(t, user2.Id, model.NewId())
 
 		dm, appErr := th.App.GetOrCreateDirectChannel(th.Context, user1.Id, user2.Id)
 		require.Nil(t, dm)
@@ -622,9 +620,7 @@ func TestCreateGroupChannel(t *testing.T) {
 	groupUserIds = append(groupUserIds, th.BasicUser.Id)
 
 	t.Run("Should not allow to create a group with a remote user", func(t *testing.T) {
-		user2.RemoteId = model.NewPointer(model.NewId())
-		_, appErr := th.App.UpdateUser(th.Context, user2, false)
-		require.Nil(t, appErr)
+		th.SetUserRemoteID(t, user2.Id, model.NewId())
 
 		dm, appErr := th.App.CreateGroupChannel(th.Context, groupUserIds, th.BasicUser.Id)
 		require.NotNil(t, appErr)
@@ -1002,7 +998,7 @@ func TestAddChannelMemberNoUserRequestor(t *testing.T) {
 		assert.Equal(t, channel.Id, history.ChannelId)
 		channelMemberHistoryUserIds = append(channelMemberHistoryUserIds, history.UserId)
 	}
-	assert.Equal(t, groupUserIds, channelMemberHistoryUserIds)
+	assert.ElementsMatch(t, groupUserIds, channelMemberHistoryUserIds)
 
 	postList, nErr := th.App.Srv().Store().Post().GetPosts(th.Context, model.GetPostsOptions{ChannelId: channel.Id, Page: 0, PerPage: 1}, false, map[string]bool{})
 	require.NoError(t, nErr)
@@ -1632,6 +1628,30 @@ func TestUpdateChannelMemberRolesChangingGuest(t *testing.T) {
 		_, appErr = th.App.UpdateChannelMemberRoles(th.Context, th.BasicChannel.Id, ruser.Id, "channel_guest channel_user")
 		require.NotNil(t, appErr, "Should work when you not modify guest role")
 	})
+}
+
+func TestUpdateChannelMemberRolesRejectsOutOfScopeBuiltInRoles(t *testing.T) {
+	mainHelper.Parallel(t)
+	th := Setup(t).InitBasic(t)
+
+	user := model.User{Email: strings.ToLower(model.NewId()) + "success+test@example.com", Nickname: "Tester", Username: "tester" + model.NewId(), Password: model.NewTestPassword(), AuthService: ""}
+	ruser, _ := th.App.CreateUser(th.Context, &user)
+
+	_, _, appErr := th.App.AddUserToTeam(th.Context, th.BasicTeam.Id, ruser.Id, "")
+	require.Nil(t, appErr)
+
+	_, appErr = th.App.AddUserToChannel(th.Context, ruser, th.BasicChannel, false)
+	require.Nil(t, appErr)
+
+	// CustomGroupUserRoleId is a built-in role whose role.BuiltIn flag is false, so it must
+	// be rejected via the shared model.IsBuiltInRole predicate rather than the BuiltIn flag.
+	// This guards the app-layer path used by plugins and bulk import, which bypass the API check.
+	for _, roleName := range []string{model.SystemManagerRoleId, model.SystemCustomGroupAdminRoleId, model.CustomGroupUserRoleId} {
+		_, appErr = th.App.UpdateChannelMemberRoles(th.Context, th.BasicChannel.Id, ruser.Id, model.ChannelUserRoleId+" "+roleName)
+		require.NotNilf(t, appErr, "expected rejection for role %s", roleName)
+		require.Equal(t, "api.channel.update_channel_member_roles.scheme_role.app_error", appErr.Id)
+		require.Equal(t, http.StatusBadRequest, appErr.StatusCode)
+	}
 }
 
 func TestUpdateChannelMemberRolesRequireUser(t *testing.T) {

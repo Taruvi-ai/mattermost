@@ -5,7 +5,7 @@ import {Browser, Page, test as base} from '@playwright/test';
 import {AxeResults} from 'axe-core';
 import {AxeBuilder} from '@axe-core/playwright';
 
-import {TestBrowser} from './browser_context';
+import {bindPageToLiveBaseURL, TestBrowser} from './browser_context';
 import {
     ensureLicense,
     ensurePluginsLoaded,
@@ -18,6 +18,10 @@ import {
 } from './flag';
 import {getBlobFromAsset, getFileFromAsset} from './file';
 import {
+    configureAIBridgeMock,
+    createKeycloakUser,
+    createLdapUser,
+    createMockAIAgent,
     createNewUserProfile,
     createNewTeam,
     createRandomChannel,
@@ -25,13 +29,41 @@ import {
     createRandomTeam,
     createRandomUser,
     createUserWithAttributes,
+    deleteKeycloakUser,
+    deleteLdapUser,
+    enableAIBridgeTestMode,
+    listMinioObjectKeys,
+    ensureMinio,
+    ensureAzurite,
+    listAzuriteBlobNames,
+    ensureLocalFile,
+    listMattermostDataFiles,
+    ensurePostgresSearch,
+    ensureFeatureFlag,
+    generateLdapUser,
+    getAIBridgeMock,
     getAdminClient,
     initSetup,
     isOutsideRemoteUserHour,
+    ldapServerConfig,
+    ensureOpenldap,
     makeClient,
-    mergeWithOnPremServerConfig,
+    recapCompletion,
+    resetAIBridgeMock,
+    rewriteCompletion,
     installAndEnablePlugin,
     isPluginActive,
+    samlServerConfig,
+    ensureKeycloak,
+    elasticsearchServerConfig,
+    opensearchServerConfig,
+    ensureElasticsearch,
+    ensureOpensearch,
+    runMmctl,
+    ensureMmctl,
+    updateLdapUser,
+    upgradeServerImage,
+    saveUpgradePhaseLogs,
 } from './server';
 import {
     toBeFocusedWithFocusVisible,
@@ -42,8 +74,14 @@ import {
 } from './test_action';
 import {pages} from './ui/pages';
 import {matchSnapshot} from './visual';
-import {stubNotification, waitForNotification} from './mock_browser_api';
-import {duration, getRandomId, simpleEmailRe, wait} from './util';
+import {
+    closeWebsockets,
+    connectWebsockets,
+    mockWebsockets,
+    stubNotification,
+    waitForNotification,
+} from './mock_browser_api';
+import {duration, getRandomId, newTestPassword, simpleEmailRe, wait} from './util';
 
 export {expect} from '@playwright/test';
 
@@ -58,12 +96,14 @@ type AxeBuilderOptions = {
 };
 
 export const test = base.extend<ExtendedFixtures>({
-    // eslint-disable-next-line no-empty-pattern
     axe: async ({}, use) => {
         const ab = new AxeBuilderExtended();
         await use(ab);
     },
     pw: async ({browser, page, isMobile}, use) => {
+        // Playwright's project baseURL is fixed at worker start; rebind so navigations follow
+        // testConfig.baseURL after testcontainers restarts remap the host port.
+        bindPageToLiveBaseURL(page);
         const pw = new PlaywrightExtended(browser, page, isMobile);
         await use(pw);
         await pw.testBrowser.close();
@@ -90,10 +130,47 @@ export class PlaywrightExtended {
     // ./server
     readonly ensurePluginsLoaded;
     readonly getAdminClient;
-    readonly mergeWithOnPremServerConfig;
     readonly initSetup;
+    readonly enableAIBridgeTestMode;
+    readonly configureAIBridgeMock;
+    readonly getAIBridgeMock;
+    readonly resetAIBridgeMock;
+    readonly createMockAIAgent;
+    readonly rewriteCompletion;
+    readonly recapCompletion;
     readonly installAndEnablePlugin;
     readonly isPluginActive;
+
+    // ./server/openldap, ./server/keycloak, ./server/elasticsearch, ./server/opensearch, ./server/minio
+    readonly generateLdapUser;
+    readonly createLdapUser;
+    readonly updateLdapUser;
+    readonly deleteLdapUser;
+    readonly ldapServerConfig;
+    readonly ensureOpenldap;
+    readonly createKeycloakUser;
+    readonly deleteKeycloakUser;
+    readonly samlServerConfig;
+    readonly ensureKeycloak;
+    readonly elasticsearchServerConfig;
+    readonly opensearchServerConfig;
+    readonly ensureElasticsearch;
+    readonly ensureOpensearch;
+    readonly listMinioObjectKeys;
+    readonly ensureMinio;
+    readonly ensureAzurite;
+    readonly ensureLocalFile;
+    readonly listMattermostDataFiles;
+    readonly ensurePostgresSearch;
+    readonly ensureFeatureFlag;
+    readonly listAzuriteBlobNames;
+    readonly runMmctl;
+    readonly ensureMmctl;
+
+    // ./server/version
+    readonly upgradeServerImage;
+    // ./server/upgrade_logs
+    readonly saveUpgradePhaseLogs;
 
     // ./test_action
     readonly toBeFocusedWithFocusVisible;
@@ -105,6 +182,9 @@ export class PlaywrightExtended {
     // ./mock_browser_api
     readonly stubNotification;
     readonly waitForNotification;
+    readonly mockWebsockets;
+    readonly connectWebsockets;
+    readonly closeWebsockets;
 
     // ./server
     readonly createNewUserProfile;
@@ -117,6 +197,7 @@ export class PlaywrightExtended {
 
     // ./util
     readonly duration;
+    readonly newTestPassword;
     readonly simpleEmailRe;
     readonly wait;
 
@@ -152,10 +233,47 @@ export class PlaywrightExtended {
         this.ensurePluginsLoaded = ensurePluginsLoaded;
         this.initSetup = initSetup;
         this.getAdminClient = getAdminClient;
-        this.mergeWithOnPremServerConfig = mergeWithOnPremServerConfig;
+        this.enableAIBridgeTestMode = enableAIBridgeTestMode;
+        this.configureAIBridgeMock = configureAIBridgeMock;
+        this.getAIBridgeMock = getAIBridgeMock;
+        this.resetAIBridgeMock = resetAIBridgeMock;
+        this.createMockAIAgent = createMockAIAgent;
+        this.rewriteCompletion = rewriteCompletion;
+        this.recapCompletion = recapCompletion;
         this.isOutsideRemoteUserHour = isOutsideRemoteUserHour;
         this.installAndEnablePlugin = installAndEnablePlugin;
         this.isPluginActive = isPluginActive;
+
+        // ./server/openldap, ./server/keycloak, ./server/elasticsearch, ./server/opensearch, ./server/minio
+        this.generateLdapUser = generateLdapUser;
+        this.createLdapUser = createLdapUser;
+        this.updateLdapUser = updateLdapUser;
+        this.deleteLdapUser = deleteLdapUser;
+        this.ldapServerConfig = ldapServerConfig;
+        this.ensureOpenldap = ensureOpenldap;
+        this.createKeycloakUser = createKeycloakUser;
+        this.deleteKeycloakUser = deleteKeycloakUser;
+        this.samlServerConfig = samlServerConfig;
+        this.ensureKeycloak = ensureKeycloak;
+        this.elasticsearchServerConfig = elasticsearchServerConfig;
+        this.opensearchServerConfig = opensearchServerConfig;
+        this.ensureElasticsearch = ensureElasticsearch;
+        this.ensureOpensearch = ensureOpensearch;
+        this.listMinioObjectKeys = listMinioObjectKeys;
+        this.ensureMinio = ensureMinio;
+        this.ensureAzurite = ensureAzurite;
+        this.ensureLocalFile = ensureLocalFile;
+        this.listMattermostDataFiles = listMattermostDataFiles;
+        this.ensurePostgresSearch = ensurePostgresSearch;
+        this.ensureFeatureFlag = ensureFeatureFlag;
+        this.listAzuriteBlobNames = listAzuriteBlobNames;
+        this.runMmctl = runMmctl;
+        this.ensureMmctl = ensureMmctl;
+
+        // ./server/version
+        this.upgradeServerImage = upgradeServerImage;
+        // ./server/upgrade_logs
+        this.saveUpgradePhaseLogs = saveUpgradePhaseLogs;
 
         // ./test_action
         this.toBeFocusedWithFocusVisible = toBeFocusedWithFocusVisible;
@@ -173,6 +291,9 @@ export class PlaywrightExtended {
         // ./mock_browser_api
         this.stubNotification = stubNotification;
         this.waitForNotification = waitForNotification;
+        this.mockWebsockets = mockWebsockets;
+        this.connectWebsockets = connectWebsockets;
+        this.closeWebsockets = closeWebsockets;
 
         // ./server
         this.createNewUserProfile = createNewUserProfile;
@@ -185,6 +306,7 @@ export class PlaywrightExtended {
         // ./util
         this.duration = duration;
         this.wait = wait;
+        this.newTestPassword = newTestPassword;
         this.simpleEmailRe = simpleEmailRe;
 
         this.random = {
