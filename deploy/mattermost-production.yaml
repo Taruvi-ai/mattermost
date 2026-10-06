@@ -1,6 +1,6 @@
-# spec.version is overwritten with the commit SHA on every deploy by
-# .github/workflows/harbor-push.yml. Set it to the currently deployed SHA
-# before applying this file, or the apply will roll the server back.
+# .github/workflows/harbor-push.yml applies this file on every deploy after
+# replacing spec.version with the commit SHA. If you apply it by hand, set
+# spec.version to the currently deployed SHA first or the server rolls back.
 apiVersion: installation.mattermost.com/v1beta1
 kind: Mattermost
 metadata:
