@@ -4559,10 +4559,6 @@
     "translation": "User creation is disabled."
   },
   {
-    "id": "api.user.create_user.signup_disabled.app_error",
-    "translation": "Self-service signup is disabled. Please contact Taruvi Administrator to create an account."
-  },
-  {
     "id": "api.user.create_user.guest_accounts.disabled.app_error",
     "translation": "Guest accounts are disabled."
   },
@@ -4869,14 +4865,6 @@
   {
     "id": "api.user.reset_password.token_parse.error",
     "translation": "Unable to parse the reset password token"
-  },
-  {
-    "id": "api.user.reset_password.disabled.app_error",
-    "translation": "Password reset is disabled. Please reset your password from Taruvi."
-  },
-  {
-    "id": "api.user.send_password_reset.disabled.app_error",
-    "translation": "Password reset is disabled. Please reset your password from Taruvi."
   },
   {
     "id": "api.user.reset_password_failed_attempts.ldap_and_email_only.app_error",
