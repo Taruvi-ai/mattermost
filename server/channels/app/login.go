@@ -4,10 +4,7 @@
 package app
 
 import (
-	"crypto/md5"
-	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
@@ -28,14 +25,6 @@ import (
 )
 
 const cwsTokenEnv = "CWS_CLOUD_TOKEN"
-
-// hashTaruviUsername hashes the Taruvi username using SHA256 then MD5
-func hashTaruviUsername(username string) string {
-	sha256Hash := sha256.Sum256([]byte(username))
-	sha256Hex := hex.EncodeToString(sha256Hash[:])
-	md5Hash := md5.Sum([]byte(sha256Hex))
-	return hex.EncodeToString(md5Hash[:])
-}
 
 func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, mfaToken, cwsToken, authType string, ldapOnly bool) (user *model.User, err *model.AppError) {
 	// Do statistics
@@ -177,8 +166,8 @@ func (a *App) authenticateWithTaruvi(rctx request.CTX, loginId, password, authTy
 }
 
 func (a *App) GetUserForLogin(rctx request.CTX, id, loginId string) (*model.User, *model.AppError) {
-	enableUsername := true
-	enableEmail := true
+	enableUsername := *a.Config().EmailSettings.EnableSignInWithUsername
+	enableEmail := *a.Config().EmailSettings.EnableSignInWithEmail
 
 	if enableEmail || enableUsername {
 		// If we are given a userID then fail if we can't find a user with that ID

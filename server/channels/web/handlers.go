@@ -240,10 +240,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 
 	if h.IsStatic {
-		// Only set X-Frame-Options if no custom FrameAncestors are configured
-		if *c.App.Config().ServiceSettings.FrameAncestors == "" {
-			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-		}
+		// Instruct the browser not to display us in an iframe unless is the same origin for anti-clickjacking
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
 
 		devCSP := generateDevCSP(*c)
 
