@@ -1,0 +1,81 @@
+# spec.version is overwritten with the commit SHA on every deploy by
+# .github/workflows/harbor-push.yml. Set it to the currently deployed SHA
+# before applying this file, or the apply will roll the server back.
+apiVersion: installation.mattermost.com/v1beta1
+kind: Mattermost
+metadata:
+  name: mattermost-production
+  namespace: mattermost
+spec:
+  image: repo.eoxvantage.com/taruvi/mattermost
+  version: ab6d09ec095ead2b190076958705ddf9d828154b
+  replicas: 2
+  imagePullPolicy: Always
+  imagePullSecrets:
+  - name: registrypullsecret
+  ingress:
+    enabled: true
+    host: chatprod.taruvi.app
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      nginx.ingress.kubernetes.io/proxy-body-size: 100m
+      nginx.ingress.kubernetes.io/proxy-read-timeout: '600'
+      nginx.ingress.kubernetes.io/proxy-send-timeout: '600'
+  database:
+    external:
+      secret: mm-chatprod-db-secret
+  fileStore:
+    external:
+      bucket: mattermost-taruviprod
+      secret: mm-chatprod-s3-secret
+      url: s3.amazonaws.com
+  scheduling:
+    resources:
+      requests:
+        cpu: 150m
+        memory: 256Mi
+      limits:
+        cpu: '2'
+        memory: 4Gi
+  mattermostEnv:
+  - name: MM_FILESETTINGS_AMAZONS3SSE
+    value: 'true'
+  - name: MM_FILESETTINGS_AMAZONS3REGION
+    value: us-east-2
+  - name: MM_FILESETTINGS_AMAZONS3ENDPOINT
+    value: s3.us-east-2.amazonaws.com
+  - name: MM_SQLSETTINGS_DATASOURCE
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_SQLSETTINGS_DATASOURCE
+  - name: MM_TARUVISETTINGS_ENABLE
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_ENABLE
+  - name: MM_TARUVISETTINGS_OVERRIDEHOST
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_OVERRIDEHOST
+  - name: MM_TARUVISETTINGS_TARUVISERVERURL
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_TARUVISERVERURL
+  - name: MM_TARUVISETTINGS_USERENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_USERENDPOINT
+  - name: MM_TARUVISETTINGS_AUTHENDPOINT
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_AUTHENDPOINT
+  - name: MM_TARUVISETTINGS_CONNECTIONTIMEOUT
+    valueFrom:
+      secretKeyRef:
+        name: mm-chatprod-infisical
+        key: MM_TARUVISETTINGS_CONNECTIONTIMEOUT
