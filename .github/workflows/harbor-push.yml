@@ -57,6 +57,9 @@ jobs:
     needs: build-and-push
     if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event.inputs.environment == 'staging'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
@@ -84,8 +87,8 @@ jobs:
           
       - name: Deploy Mattermost staging
         run: |
-          kubectl patch mattermost mattermost-staging -n mattermost --type='json' \
-            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
+          sed -i "s/^  version: .*/  version: ${{ github.sha }}/" deploy/mattermost-staging.yaml
+          kubectl apply -f deploy/mattermost-staging.yaml
           kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
 
   deploy-production:
@@ -94,6 +97,9 @@ jobs:
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.inputs.environment == 'production'
     environment: production
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
@@ -121,6 +127,6 @@ jobs:
       
       - name: Deploy Mattermost production
         run: |
-          kubectl patch mattermost mattermost-production -n mattermost --type='json' \
-            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
+          sed -i "s/^  version: .*/  version: ${{ github.sha }}/" deploy/mattermost-production.yaml
+          kubectl apply -f deploy/mattermost-production.yaml
           kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost
