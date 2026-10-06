@@ -96,7 +96,7 @@ func (tp *TaruviProvider) verifyJWTToken(rctx request.CTX, token string) (*model
 		return nil, model.NewAppError("TaruviProvider.verifyJWTToken", "api.taruvi.verify.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi verify response", 
+	rctx.Logger().Info("Taruvi verify response",
 		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
@@ -180,7 +180,7 @@ func (tp *TaruviProvider) authenticateWithPassword(rctx request.CTX, username, p
 		return nil, model.NewAppError("TaruviProvider.AuthenticateUser", "api.taruvi.authenticate.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi response", 
+	rctx.Logger().Info("Taruvi response",
 		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {
@@ -233,7 +233,7 @@ func (tp *TaruviProvider) getUserInfoWithToken(rctx request.CTX, token string) (
 		return nil, model.NewAppError("TaruviProvider.getUserInfoWithToken", "api.taruvi.get_user.read_error", nil, "", http.StatusInternalServerError).Wrap(err)
 	}
 
-	rctx.Logger().Info("Taruvi get user response", 
+	rctx.Logger().Info("Taruvi get user response",
 		mlog.Int("status_code", resp.StatusCode))
 
 	if resp.StatusCode != http.StatusOK {

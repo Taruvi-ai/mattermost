@@ -143,12 +143,12 @@ const (
 	ExportSettingsDefaultDirectory     = "./export"
 	ExportSettingsDefaultRetentionDays = 30
 
-	TaruviSettingsDefaultServerURL          = "http://localhost:8000"
-	TaruviSettingsDefaultAuthEndpoint       = "/api/_allauth/browser/v1/auth/login"
-	TaruviSettingsDefaultUserEndpoint       = "/api/users/me/"
-	TaruviSettingsDefaultVerifyEndpoint     = "/api/auth/jwt/token/verify/"
-	TaruviSettingsDefaultSessionEndpoint    = "/_allauth/app/v1/auth/session"
-	TaruviSettingsDefaultConnectionTimeout  = 10
+	TaruviSettingsDefaultServerURL         = "http://localhost:8000"
+	TaruviSettingsDefaultAuthEndpoint      = "/api/_allauth/browser/v1/auth/login"
+	TaruviSettingsDefaultUserEndpoint      = "/api/users/me/"
+	TaruviSettingsDefaultVerifyEndpoint    = "/api/auth/jwt/token/verify/"
+	TaruviSettingsDefaultSessionEndpoint   = "/_allauth/app/v1/auth/session"
+	TaruviSettingsDefaultConnectionTimeout = 10
 
 	EmailSettingsDefaultFeedbackOrganization = ""
 
@@ -4073,8 +4073,8 @@ type Config struct {
 	ComplianceSettings          ComplianceSettings
 	LocalizationSettings        LocalizationSettings
 	SamlSettings                SamlSettings
-	KeycloakSettings              KeycloakSettings
-	TaruviSettings                TaruviSettings
+	KeycloakSettings            KeycloakSettings
+	TaruviSettings              TaruviSettings
 	NativeAppSettings           NativeAppSettings
 	IntuneSettings              IntuneSettings
 	CacheSettings               CacheSettings
