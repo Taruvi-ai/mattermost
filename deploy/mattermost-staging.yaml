@@ -1,18 +1,17 @@
 # .github/workflows/harbor-push.yml applies this file on every deploy after
-# replacing spec.version with the commit SHA. If you apply it by hand, set
-# spec.version to the currently deployed SHA first or the server rolls back.
+# replacing __DEPLOY_COMMIT_SHA__ with the commit SHA. The image tag (stag)
+# stays the same, so that marker is what makes Kubernetes replace the pod and
+# pull the newest image. Applying this file by hand also restarts the pod.
 apiVersion: installation.mattermost.com/v1beta1
 kind: Mattermost
 metadata:
   name: mattermost-staging
   namespace: mattermost
 spec:
-  image: repo.eoxvantage.com/taruvi/mattermost
-  version: ab6d09ec095ead2b190076958705ddf9d828154b
+  image: 150356453157.dkr.ecr.us-east-2.amazonaws.com/taruvi/mattermost
+  version: stag
   replicas: 1
-  imagePullPolicy: IfNotPresent
-  imagePullSecrets:
-  - name: registrypullsecret
+  imagePullPolicy: Always
   ingress:
     enabled: true
     host: chatstag.taruvi.app
@@ -38,6 +37,8 @@ spec:
         cpu: '4'
         memory: 8Gi
   mattermostEnv:
+  - name: DEPLOY_COMMIT_SHA
+    value: "__DEPLOY_COMMIT_SHA__"
   - name: MM_FILESETTINGS_AMAZONS3SSE
     value: 'true'
   - name: MM_FILESETTINGS_AMAZONS3REGION
