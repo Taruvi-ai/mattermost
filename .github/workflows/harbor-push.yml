@@ -1,4 +1,4 @@
-name: Build and Push to Harbor Taruvi
+name: Build and Push to ECR Taruvi
 
 on:
   push:
@@ -16,9 +16,72 @@ on:
           - production
         default: staging
 
+concurrency:
+  group: mattermost-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-and-push:
     runs-on: ubuntu-22.04
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Decide image tags
+        id: tag
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          INPUT_ENV: ${{ inputs.environment }}
+        run: |
+          if [ "$EVENT_NAME" = "push" ]; then
+            if [ "$REF" = "refs/heads/main" ]; then ENV=prod; else ENV=stag; fi
+          else
+            if [ "$INPUT_ENV" = "production" ]; then ENV=prod; else ENV=stag; fi
+          fi
+          if [ "$ENV" = "prod" ] && [ "$REF" != "refs/heads/main" ]; then
+            echo "Production images can only be built from main" >&2; exit 1
+          fi
+          if [ "$ENV" = "stag" ] && [ "$REF" != "refs/heads/dev" ]; then
+            echo "Staging images can only be built from dev" >&2; exit 1
+          fi
+          echo "env_tag=${ENV}" >> "$GITHUB_OUTPUT"
+          echo "sha_tag=${ENV}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials (ECR push role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_ECR_PUSH_ROLE_ARN }}
+          role-session-name: gha-ecr-push-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: us-east-2
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push
+        uses: docker/build-push-action@v6
+        with:
+          push: true
+          no-cache: true
+          tags: |
+            ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.env_tag }}
+            ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.sha_tag }}
+
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event.inputs.environment == 'staging'
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,45 +96,11 @@ jobs:
           secret-path: /Mattermost
           domain: "https://environment.eoxvantage.com"
 
-      - name: Login to Harbor
-        uses: docker/login-action@v3
-        with:
-          registry: repo.eoxvantage.com
-          username: ${{ env.HARBOR_USERNAME }}
-          password: ${{ env.HARBOR_PASSWORD }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and Push
-        uses: docker/build-push-action@v6
-        with:
-          push: true
-          no-cache: true
-          tags: |
-            repo.eoxvantage.com/taruvi/mattermost:${{ github.ref_name }}
-            repo.eoxvantage.com/taruvi/mattermost:${{ github.sha }}
-
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: build-and-push
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/dev') || github.event.inputs.environment == 'staging'
-    steps:
-      - name: Get environment variables from Infisical
-        uses: Infisical/secrets-action@v1.0.7
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          env-slug: taruvi-test
-          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
-          secret-path: /Mattermost
-          domain: "https://environment.eoxvantage.com"
-
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-mattermost-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Update kube config
@@ -81,19 +110,32 @@ jobs:
         run: |
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
-          
+
       - name: Deploy Mattermost staging
+        env:
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          kubectl patch mattermost mattermost-staging -n mattermost --type='json' \
-            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
-          kubectl rollout status deployment mattermost-staging --timeout=600s -n mattermost
+          sed -i "s|__DEPLOY_COMMIT_SHA__|${COMMIT_SHA}|" deploy/mattermost-staging.yaml
+          kubectl apply -f deploy/mattermost-staging.yaml
+
+      - name: Wait for rollout and check the site
+        run: |
+          sleep 60
+          kubectl rollout status deployment mattermost-staging --timeout=900s -n mattermost
+          curl -fsS --retry 10 --retry-delay 10 https://chatstag.taruvi.app/api/v4/system/ping
 
   deploy-production:
     runs-on: ubuntu-latest
     needs: build-and-push
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event.inputs.environment == 'production'
     environment: production
+    permissions:
+      id-token: write
+      contents: read
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Get environment variables from Infisical
         uses: Infisical/secrets-action@v1.0.7
         with:
@@ -105,10 +147,10 @@ jobs:
           domain: "https://environment.eoxvantage.com"
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v6
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gha-mattermost-deploy-${{ github.run_id }}-${{ github.run_attempt }}
           aws-region: ${{ secrets.AWS_REGION }}
 
       - name: Update kube config
@@ -118,9 +160,16 @@ jobs:
         run: |
           printenv | grep '^MM_' > /tmp/mm.env
           kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
-      
+
       - name: Deploy Mattermost production
+        env:
+          COMMIT_SHA: ${{ github.sha }}
         run: |
-          kubectl patch mattermost mattermost-production -n mattermost --type='json' \
-            -p='[{"op":"replace","path":"/spec/version","value":"${{ github.sha }}"}]'
-          kubectl rollout status deployment mattermost-production --timeout=600s -n mattermost
+          sed -i "s|__DEPLOY_COMMIT_SHA__|${COMMIT_SHA}|" deploy/mattermost-production.yaml
+          kubectl apply -f deploy/mattermost-production.yaml
+
+      - name: Wait for rollout and check the site
+        run: |
+          sleep 60
+          kubectl rollout status deployment mattermost-production --timeout=900s -n mattermost
+          curl -fsS --retry 10 --retry-delay 10 https://chatprod.taruvi.app/api/v4/system/ping
