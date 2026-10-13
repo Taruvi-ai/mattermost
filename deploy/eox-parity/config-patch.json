@@ -1,0 +1,37 @@
+{
+  "ServiceSettings": {
+    "CollapsedThreads": "always_on",
+    "EnableTutorial": false,
+    "EnableOnboardingFlow": false,
+    "ExperimentalEnableDefaultChannelLeaveJoinMessages": false,
+    "EnableUserAccessTokens": true,
+    "EnableBotAccountCreation": true,
+    "EnablePostUsernameOverride": true,
+    "EnablePostIconOverride": true,
+    "TrustedProxyIPHeader": ["X-Forwarded-For", "X-Real-IP"]
+  },
+  "TeamSettings": {
+    "SiteName": "Taruvi",
+    "TeammateNameDisplay": "full_name",
+    "MaxUsersPerTeam": 5000,
+    "MaxChannelsPerTeam": 20000,
+    "MaxNotificationsPerChannel": 1000000
+  },
+  "AnnouncementSettings": {
+    "UserNoticesEnabled": false
+  },
+  "EmailSettings": {
+    "EnablePreviewModeBanner": false
+  },
+  "ImageProxySettings": {
+    "Enable": true,
+    "ImageProxyType": "local"
+  },
+  "PluginSettings": {
+    "PluginStates": {
+      "com.mattermost.nps": {
+        "Enable": false
+      }
+    }
+  }
+}
