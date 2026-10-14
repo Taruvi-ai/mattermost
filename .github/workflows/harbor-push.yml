@@ -70,6 +70,7 @@ jobs:
         with:
           push: true
           no-cache: true
+          provenance: false
           tags: |
             ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.env_tag }}
             ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.sha_tag }}
