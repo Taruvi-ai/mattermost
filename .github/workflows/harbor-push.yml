@@ -49,7 +49,6 @@ jobs:
             echo "Staging images can only be built from dev" >&2; exit 1
           fi
           echo "env_tag=${ENV}" >> "$GITHUB_OUTPUT"
-          echo "sha_tag=${ENV}-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials (ECR push role)
         uses: aws-actions/configure-aws-credentials@v6
@@ -71,9 +70,7 @@ jobs:
           push: true
           no-cache: true
           provenance: false
-          tags: |
-            ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.env_tag }}
-            ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.sha_tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/taruvi/mattermost:${{ steps.tag.outputs.env_tag }}
 
   deploy-staging:
     runs-on: ubuntu-latest
