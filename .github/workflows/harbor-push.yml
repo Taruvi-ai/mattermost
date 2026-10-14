@@ -87,16 +87,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get environment variables from Infisical
-        uses: Infisical/secrets-action@v1.0.7
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          env-slug: taruvi-test
-          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
-          secret-path: /Mattermost
-          domain: "https://environment.eoxvantage.com"
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -106,11 +96,6 @@ jobs:
 
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
-
-      - name: Create/Update Infisical Secret
-        run: |
-          printenv | grep '^MM_' > /tmp/mm.env
-          kubectl create secret generic mm-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Mattermost staging
         env:
@@ -137,16 +122,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get environment variables from Infisical
-        uses: Infisical/secrets-action@v1.0.7
-        with:
-          client-id: ${{ secrets.INFISICAL_CLIENT_ID }}
-          client-secret: ${{ secrets.INFISICAL_CLIENT_SECRET }}
-          env-slug: taruvi-prod
-          project-slug: ${{ vars.TARUVI_PROJECT_SLUG }}
-          secret-path: /Mattermost
-          domain: "https://environment.eoxvantage.com"
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -156,11 +131,6 @@ jobs:
 
       - name: Update kube config
         run: aws eks update-kubeconfig --name ${{ secrets.AWS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
-
-      - name: Create/Update Infisical Secret
-        run: |
-          printenv | grep '^MM_' > /tmp/mm.env
-          kubectl create secret generic mm-chatprod-infisical --from-env-file=/tmp/mm.env -n mattermost --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Mattermost production
         env:
