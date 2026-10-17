@@ -55,6 +55,11 @@ spec:
       secretKeyRef:
         name: mm-infisical
         key: MM_EMAILSETTINGS_SENDPUSHNOTIFICATIONS
+  - name: MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_EMAILSETTINGS_SENDEMAILNOTIFICATIONS
   - name: MM_SQLSETTINGS_DATASOURCE
     valueFrom:
       secretKeyRef:
