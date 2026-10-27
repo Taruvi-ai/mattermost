@@ -25,8 +25,8 @@ spec:
       secret: mm-db-secret
   fileStore:
     external:
-      bucket: mattermost-chatstag
-      secret: mm-s3-secret
+      bucket: eoschat
+      secret: mm-infisical
       url: s3.amazonaws.com
   scheduling:
     resources:
@@ -45,6 +45,16 @@ spec:
     value: us-east-2
   - name: MM_FILESETTINGS_AMAZONS3ENDPOINT
     value: s3.us-east-2.amazonaws.com
+  - name: MM_FILESETTINGS_AMAZONS3BUCKET
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_FILESETTINGS_AMAZONS3BUCKET
+  - name: MM_FILESETTINGS_AMAZONS3PATHPREFIX
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_FILESETTINGS_AMAZONS3PATHPREFIX
   - name: MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER
     valueFrom:
       secretKeyRef:
