@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -2254,5 +2255,81 @@ func TestRedactOAuthTokenResponse(t *testing.T) {
 			assert.NotContains(t, actual, "abc")
 			assert.NotContains(t, actual, "def")
 		}
+	})
+}
+
+func TestLoginByOAuthLinksVerifiedEmail(t *testing.T) {
+	th := Setup(t)
+
+	th.App.UpdateConfig(func(cfg *model.Config) {
+		cfg.OpenIdSettings.Enable = model.NewPointer(true)
+		cfg.OpenIdSettings.Scope = model.NewPointer(OpenIDScope)
+		*cfg.TeamSettings.EnableUserCreation = false
+	})
+
+	login := func(t *testing.T, authUser *model.User) (*model.User, *model.AppError) {
+		t.Helper()
+		provider := &mocks.OAuthProvider{}
+		provider.On("GetSSOSettings", mock.Anything, mock.Anything, model.ServiceOpenid).Return(&model.SSOSettings{}, nil)
+		provider.On("GetUserFromJSON", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(authUser, nil)
+		einterfaces.RegisterOAuthProvider(model.ServiceOpenid, provider)
+		return th.App.LoginByOAuth(th.Context, model.ServiceOpenid, strings.NewReader("{}"), "", "", nil)
+	}
+
+	t.Run("links an existing account when the email is verified", func(t *testing.T) {
+		existing := th.CreateUser(t)
+		authUser := &model.User{Username: existing.Username, Email: existing.Email, EmailVerified: true, AuthData: model.NewPointer(model.NewId()), AuthService: model.ServiceOpenid}
+
+		user, appErr := login(t, authUser)
+		require.Nil(t, appErr)
+		assert.Equal(t, existing.Id, user.Id)
+
+		stored, appErr := th.App.GetUser(existing.Id)
+		require.Nil(t, appErr)
+		assert.Equal(t, model.ServiceOpenid, stored.AuthService)
+		assert.Equal(t, *authUser.AuthData, *stored.AuthData)
+
+		user, appErr = login(t, authUser)
+		require.Nil(t, appErr)
+		assert.Equal(t, existing.Id, user.Id)
+	})
+
+	t.Run("does not link when the email is not verified", func(t *testing.T) {
+		existing := th.CreateUser(t)
+
+		_, appErr := login(t, &model.User{Email: existing.Email, AuthData: model.NewPointer(model.NewId()), AuthService: model.ServiceOpenid})
+		require.NotNil(t, appErr)
+
+		stored, appErr := th.App.GetUser(existing.Id)
+		require.Nil(t, appErr)
+		assert.Empty(t, stored.AuthService)
+	})
+
+	t.Run("does not link a deactivated account", func(t *testing.T) {
+		existing := th.CreateUser(t)
+		_, appErr := th.App.UpdateActive(th.Context, existing, false)
+		require.Nil(t, appErr)
+
+		_, appErr = login(t, &model.User{Email: existing.Email, EmailVerified: true, AuthData: model.NewPointer(model.NewId()), AuthService: model.ServiceOpenid})
+		require.NotNil(t, appErr)
+		assert.Equal(t, "api.user.login.inactive.app_error", appErr.Id)
+
+		stored, appErr := th.App.GetUser(existing.Id)
+		require.Nil(t, appErr)
+		assert.Empty(t, stored.AuthService)
+	})
+
+	t.Run("does not relink an account that already has an SSO identity", func(t *testing.T) {
+		existing := th.CreateUser(t)
+		_, err := th.App.Srv().Store().User().UpdateAuthData(existing.Id, model.ServiceGitlab, model.NewPointer("gitlab-1"), "", false)
+		require.NoError(t, err)
+		th.App.InvalidateCacheForUser(existing.Id)
+
+		_, appErr := login(t, &model.User{Email: existing.Email, EmailVerified: true, AuthData: model.NewPointer(model.NewId()), AuthService: model.ServiceOpenid})
+		require.NotNil(t, appErr)
+
+		stored, appErr := th.App.GetUser(existing.Id)
+		require.Nil(t, appErr)
+		assert.Equal(t, model.ServiceGitlab, stored.AuthService)
 	})
 }
