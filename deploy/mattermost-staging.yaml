@@ -45,6 +45,9 @@ spec:
     value: us-east-2
   - name: MM_FILESETTINGS_AMAZONS3ENDPOINT
     value: s3.us-east-2.amazonaws.com
+  # Overrides the operator's default label "production"; explicit entries win.
+  - name: MM_CLUSTERSETTINGS_CLUSTERNAME
+    value: staging
   - name: MM_FILESETTINGS_AMAZONS3BUCKET
     valueFrom:
       secretKeyRef:
@@ -85,11 +88,6 @@ spec:
       secretKeyRef:
         name: mm-infisical
         key: MM_SERVICESETTINGS_ALLOWCORSFROM
-  - name: MM_SERVICESETTINGS_COOKIESAMESITE
-    valueFrom:
-      secretKeyRef:
-        name: mm-infisical
-        key: MM_SERVICESETTINGS_COOKIESAMESITE
   - name: MM_SERVICESETTINGS_CORSALLOWCREDENTIALS
     valueFrom:
       secretKeyRef:
