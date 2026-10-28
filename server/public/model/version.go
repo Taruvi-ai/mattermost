@@ -168,6 +168,7 @@ var BuildEnterpriseReady string
 var versionsWithoutHotFixes []string
 
 func init() {
+	BuildEnterpriseReady = "true"
 	versionsWithoutHotFixes = make([]string, 0, len(versions))
 	seen := make(map[string]string)
 

@@ -46,6 +46,39 @@ func (ps *PlatformService) License() *model.License {
 	return ps.licenseValue.Load()
 }
 
+func newTaruviLicense() *model.License {
+	users := 30000
+	lic := &model.License{
+		Id:           "taruvi-enterprise-license",
+		IssuedAt:     1704067200000,
+		StartsAt:     1704067200000,
+		ExpiresAt:    2082758400000,
+		SkuName:      "Enterprise Advanced",
+		SkuShortName: model.LicenseShortSkuEnterpriseAdvanced,
+		Customer: &model.Customer{
+			Id:      "taruvi",
+			Name:    "Taruvi",
+			Email:   "support@eoxvantage.com",
+			Company: "Taruvi",
+		},
+		Features: &model.Features{
+			Users:           &users,
+			LDAP:            model.NewPointer(false),
+			LDAPGroups:      model.NewPointer(false),
+			SAML:            model.NewPointer(false),
+			Cluster:         model.NewPointer(false),
+			Elasticsearch:   model.NewPointer(false),
+			Compliance:      model.NewPointer(false),
+			DataRetention:   model.NewPointer(false),
+			MessageExport:   model.NewPointer(false),
+			AutoTranslation: model.NewPointer(false),
+		},
+		Limits: &model.LicenseLimits{},
+	}
+	lic.Features.SetDefaults()
+	return lic
+}
+
 func (ps *PlatformService) LoadLicense() {
 	c := request.EmptyContext(ps.logger)
 
@@ -102,20 +135,7 @@ func (ps *PlatformService) LoadLicense() {
 
 	record, nErr := ps.Store.License().Get(sqlstore.RequestContextWithMaster(c), licenseId)
 	if nErr != nil {
-		if ps.Config().FeatureFlags.EnableMattermostEntry && model.BuildEnterpriseReady == "true" {
-			ps.logger.Info("Mattermost Entry is enabled. Unlocking enterprise features.")
-
-			if ps.LicenseManager() == nil {
-				ps.logger.Warn("License manager not available, setting license to nil.")
-				ps.SetLicense(nil)
-				return
-			}
-
-			ps.SetLicense(ps.LicenseManager().NewMattermostEntryLicense(ps.telemetryId))
-		} else {
-			ps.logger.Warn("License key from https://mattermost.com required to unlock enterprise features.", mlog.Err(nErr))
-			ps.SetLicense(nil)
-		}
+		ps.SetLicense(newTaruviLicense())
 		return
 	}
 
