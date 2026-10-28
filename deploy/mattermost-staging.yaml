@@ -55,6 +55,11 @@ spec:
       secretKeyRef:
         name: mm-infisical
         key: MM_FILESETTINGS_AMAZONS3PATHPREFIX
+  - name: MM_SERVICESETTINGS_ENABLEGIFPICKER
+    valueFrom:
+      secretKeyRef:
+        name: mm-infisical
+        key: MM_SERVICESETTINGS_ENABLEGIFPICKER
   - name: MM_EMAILSETTINGS_PUSHNOTIFICATIONSERVER
     valueFrom:
       secretKeyRef:
