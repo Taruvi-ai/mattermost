@@ -76,13 +76,7 @@
 <script>
   var pending = null;
   var loginAttempted = false;
-  var hintTimer = setTimeout(function() {
-    document.getElementById('hint').classList.add('visible');
-  }, 1200);
-
-  if (document.requestStorageAccess) {
-    document.requestStorageAccess().catch(function() {});
-  }
+  var waitingForTap = false;
 
   window.addEventListener("message", function(e) {
     var ok = e.origin.endsWith(".taruvi.space") || e.origin.endsWith(".taruvi.app");
@@ -90,20 +84,7 @@
     if (loginAttempted) return; // ignore duplicate postMessages
     loginAttempted = true;
     pending = e.data;
-
-    if (document.requestStorageAccess) {
-      document.requestStorageAccess()
-        .then(function() {
-          clearTimeout(hintTimer);
-          doLogin();
-        })
-        .catch(function() {
-          // Show hint immediately — user needs to tap
-          document.getElementById('hint').classList.add('visible');
-        });
-    } else {
-      doLogin();
-    }
+    doLogin();
   });
 
   function doLogin() {
@@ -121,7 +102,7 @@
       })
     }).then(function(r) {
       if (r.ok) {
-        window.location.href = "/";
+        openChat();
       } else {
         window.parent.postMessage({ type: "mm-login-failed" }, pending.origin || "*");
       }
@@ -130,13 +111,36 @@
     });
   }
 
-  function connect() {
-    if (!pending) return;
-    if (document.requestStorageAccess) {
-      document.requestStorageAccess().then(doLogin).catch(doLogin);
-    } else {
-      doLogin();
+  // Chrome with third-party cookies blocked (e.g. incognito) also blocks localStorage
+  // in this iframe, and the Mattermost app cannot start without it.
+  function openChat() {
+    if (storageUsable() || !document.requestStorageAccess) {
+      goToChat();
+      return;
     }
+    document.requestStorageAccess().then(goToChat).catch(function() {
+      waitingForTap = true;
+      document.getElementById('hint').classList.add('visible');
+    });
+  }
+
+  function storageUsable() {
+    try {
+      localStorage.setItem("mm_probe", "1");
+      localStorage.removeItem("mm_probe");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function connect() {
+    if (!waitingForTap) return;
+    document.requestStorageAccess().then(goToChat).catch(goToChat);
+  }
+
+  function goToChat() {
+    window.location.href = "/";
   }
 
   window.parent.postMessage({ type: "mm-bridge-ready" }, "*");
