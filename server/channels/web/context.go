@@ -179,6 +179,11 @@ func (c *Context) RemoveSessionCookie(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   -1,
 		HttpOnly: true,
 	}
+	if app.GetProtocol(r) == "https" {
+		cookie.Secure = true
+		cookie.SameSite = http.SameSiteNoneMode
+		cookie.Partitioned = true
+	}
 
 	http.SetCookie(w, cookie)
 }

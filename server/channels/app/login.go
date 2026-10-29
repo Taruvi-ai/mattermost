@@ -377,6 +377,9 @@ func (a *App) AttachSessionCookies(rctx request.CTX, w http.ResponseWriter, r *h
 		sessionCookie.SameSite = http.SameSiteNoneMode
 		userCookie.SameSite = http.SameSiteNoneMode
 		csrfCookie.SameSite = http.SameSiteNoneMode
+		sessionCookie.Partitioned = true
+		userCookie.Partitioned = true
+		csrfCookie.Partitioned = true
 	}
 
 	http.SetCookie(w, sessionCookie)
