@@ -374,6 +374,21 @@ func (a *App) AttachSessionCookies(rctx request.CTX, w http.ResponseWriter, r *h
 	}
 
 	if secure {
+		// Browsers keep unpartitioned cookies from earlier logins next to the partitioned
+		// ones and send both; the server reads the first, which is the stale one.
+		for _, c := range []*http.Cookie{sessionCookie, userCookie, csrfCookie} {
+			http.SetCookie(w, &http.Cookie{
+				Name:     c.Name,
+				Value:    "",
+				Path:     c.Path,
+				Domain:   c.Domain,
+				MaxAge:   -1,
+				HttpOnly: c.HttpOnly,
+				Secure:   true,
+				SameSite: http.SameSiteNoneMode,
+			})
+		}
+
 		sessionCookie.SameSite = http.SameSiteNoneMode
 		userCookie.SameSite = http.SameSiteNoneMode
 		csrfCookie.SameSite = http.SameSiteNoneMode

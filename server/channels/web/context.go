@@ -182,7 +182,9 @@ func (c *Context) RemoveSessionCookie(w http.ResponseWriter, r *http.Request) {
 	if app.GetProtocol(r) == "https" {
 		cookie.Secure = true
 		cookie.SameSite = http.SameSiteNoneMode
-		cookie.Partitioned = true
+		partitioned := *cookie
+		partitioned.Partitioned = true
+		http.SetCookie(w, &partitioned)
 	}
 
 	http.SetCookie(w, cookie)
