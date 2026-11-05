@@ -85,84 +85,16 @@ func (a *App) AuthenticateUserForLogin(rctx request.CTX, id, loginId, password, 
 			"api.user.login_by_cws.invalid_token.app_error", nil, "", http.StatusBadRequest)
 	}
 
-	// Authenticate via Taruvi session token, Keycloak, or Taruvi password/JWT
-	if authType == "session" || !*a.Config().KeycloakSettings.Enable {
-		// Session token always goes to Taruvi; password/JWT goes to Taruvi when Keycloak is disabled
-		rctx.Logger().Info("Starting Taruvi authentication",
-			mlog.String("login_id", loginId), mlog.String("auth_type", authType))
-
-		authResp, err := a.authenticateWithTaruvi(rctx, loginId, password, authType)
-		if err != nil {
-			return nil, err
-		}
-
-		rctx.Logger().Info("Taruvi authentication successful",
-			mlog.String("taruvi_username", authResp.Data.User.Username))
-	} else {
-		rctx.Logger().Info("Starting Keycloak authentication", mlog.String("login_id", loginId))
-
-		kcUser, err := a.Keycloak().AuthenticateUser(rctx, loginId, password)
-		if err != nil {
-			rctx.Logger().Error("Keycloak authentication failed", mlog.Err(err))
-			return nil, err
-		}
-
-		rctx.Logger().Info("Keycloak authentication successful",
-			mlog.String("keycloak_email", kcUser.Email),
-			mlog.String("keycloak_username", kcUser.PreferredUsername))
-	}
-
-	// Look up the pre-created MM user by loginId
-	user, err = a.GetUserForLogin(rctx, id, loginId)
-	if err != nil {
-		rctx.Logger().Error("GetUserForLogin failed",
-			mlog.String("id", id),
-			mlog.String("loginId", loginId),
-			mlog.Err(err))
-		return nil, err
-	}
-
-	if err := checkUserNotBot(user); err != nil {
-		return nil, err
-	}
-
-	if err := checkUserNotDisabled(user); err != nil {
-		return nil, err
-	}
-
-	if user.FailedAttempts > 0 {
-		if passErr := a.Srv().Store().User().UpdateFailedPasswordAttempts(user.Id, 0); passErr != nil {
-			return nil, model.NewAppError("AuthenticateUserForLogin",
-				"app.user.update_failed_pwd_attempts.app_error", nil, "", http.StatusInternalServerError).Wrap(passErr)
-		}
-	}
-
-	return user, nil
-}
-
-// authenticateWithTaruvi calls Taruvi to authenticate and verifies loginId matches the response.
-func (a *App) authenticateWithTaruvi(rctx request.CTX, loginId, password, authType string) (*model.TaruviAuthResponse, *model.AppError) {
-	authResp, err := a.Taruvi().AuthenticateUser(rctx, loginId, password, authType)
-	if err != nil {
-		rctx.Logger().Error("Taruvi authentication failed", mlog.Err(err))
-		return nil, err
-	}
-
-	// Verify loginId matches the authenticated Taruvi user
-	taruviEmail := strings.ToLower(authResp.Data.User.Email)
-	taruviUsername := strings.ToLower(authResp.Data.User.Username)
-	normalizedLoginId := strings.ToLower(loginId)
-
-	if normalizedLoginId != taruviEmail && normalizedLoginId != taruviUsername {
-		rctx.Logger().Error("Login ID mismatch with Taruvi user",
-			mlog.String("login_id", loginId),
-			mlog.String("taruvi_email", taruviEmail),
-			mlog.String("taruvi_username", taruviUsername))
-		return nil, model.NewAppError("authenticateWithTaruvi",
-			"api.user.login.invalid_credentials_email_username", nil, "", http.StatusUnauthorized)
-	}
-
-	return authResp, nil
+	// Credential login (username/password, JWT, or Taruvi session) is disabled: this
+	// deployment authenticates via OpenID Connect only. SSO logins are handled by
+	// LoginByOAuth and never reach AuthenticateUserForLogin, so any request arriving here
+	// (other than the CWS one-time token handled above) is a credential login and is refused.
+	rctx.Logger().Warn("Refused non-SSO login attempt (authentication is OpenID Connect only)",
+		mlog.String("login_id", loginId),
+		mlog.String("auth_type", authType))
+	return nil, model.NewAppError("AuthenticateUserForLogin",
+		"api.user.login.use_auth_service.app_error",
+		map[string]any{"AuthService": "OpenID Connect"}, "", http.StatusUnauthorized)
 }
 
 func (a *App) GetUserForLogin(rctx request.CTX, id, loginId string) (*model.User, *model.AppError) {
