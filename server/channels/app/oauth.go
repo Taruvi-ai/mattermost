@@ -855,6 +855,17 @@ func (a *App) linkOAuthUserByVerifiedEmail(rctx request.CTX, service string, aut
 		return nil, nil
 	}
 
+	// The email matched an existing account; require the username to match too before linking.
+	// The two values go to the server log only, never into the AppError detail.
+	if !strings.EqualFold(user.Username, authUser.Username) {
+		rctx.Logger().Error("OpenID identity username does not match the existing account; refusing to link",
+			mlog.String("user_id", user.Id),
+			mlog.String("mm_username", user.Username),
+			mlog.String("oidc_username", authUser.Username))
+		return nil, model.NewAppError("linkOAuthUserByVerifiedEmail",
+			"api.user.login.invalid_credentials_email_username", nil, "", http.StatusUnauthorized)
+	}
+
 	if appErr := checkUserNotBot(user); appErr != nil {
 		return nil, appErr
 	}
