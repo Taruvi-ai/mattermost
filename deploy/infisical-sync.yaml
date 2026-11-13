@@ -1,0 +1,60 @@
+# Infisical operator (namespace infisical-operator) copies Infisical project
+# taruvi-qmc-d, folder /Mattermost, into the Kubernetes secret each pod reads:
+#   staging:    env taruvi-test -> secret mm-infisical
+#   production: env taruvi-prod -> secret mm-chatprod-infisical
+# Refreshed every 60 s. No auto-reload: pods use new values only after a restart.
+# Applied by hand by a cluster admin; CI does not apply this file. Apply one
+# environment at a time with the label, e.g.:
+#   kubectl apply -f deploy/infisical-sync.yaml -l taruvi.app/env=staging
+# The login secrets (mattermost-*-infisical-login in infisical-operator) are
+# created by hand and are not in git.
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: mattermost-staging-settings
+  namespace: mattermost
+  labels:
+    taruvi.app/env: staging
+spec:
+  hostAPI: https://environment.eoxvantage.com/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: taruvi-qmc-d
+        envSlug: taruvi-test
+        secretsPath: /Mattermost
+        recursive: false
+      credentialsRef:
+        secretName: mattermost-staging-infisical-login
+        secretNamespace: infisical-operator
+  managedSecretReference:
+    secretName: mm-infisical
+    secretNamespace: mattermost
+    creationPolicy: Orphan
+---
+apiVersion: secrets.infisical.com/v1alpha1
+kind: InfisicalSecret
+metadata:
+  name: mattermost-production-settings
+  namespace: mattermost
+  labels:
+    taruvi.app/env: production
+spec:
+  hostAPI: https://environment.eoxvantage.com/api
+  resyncInterval: 60
+  authentication:
+    universalAuth:
+      secretsScope:
+        projectSlug: taruvi-qmc-d
+        envSlug: taruvi-prod
+        secretsPath: /Mattermost
+        recursive: false
+      credentialsRef:
+        secretName: mattermost-production-infisical-login
+        secretNamespace: infisical-operator
+  managedSecretReference:
+    secretName: mm-chatprod-infisical
+    secretNamespace: mattermost
+    creationPolicy: Orphan
+
