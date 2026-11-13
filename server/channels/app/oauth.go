@@ -803,7 +803,10 @@ func (a *App) LoginByOAuth(rctx request.CTX, service string, userData io.Reader,
 	user, appErr := a.GetUserByAuth(model.NewPointer(*authUser.AuthData), service)
 	if appErr != nil {
 		if appErr.Id == MissingAuthAccountError {
-			user, appErr = a.CreateOAuthUser(rctx, service, bytes.NewReader(buf.Bytes()), inviteToken, inviteId, tokenUser)
+			user, appErr = a.linkOAuthUserByVerifiedEmail(rctx, service, authUser)
+			if appErr == nil && user == nil {
+				user, appErr = a.CreateOAuthUser(rctx, service, bytes.NewReader(buf.Bytes()), inviteToken, inviteId, tokenUser)
+			}
 		} else {
 			return nil, appErr
 		}
@@ -827,6 +830,49 @@ func (a *App) LoginByOAuth(rctx request.CTX, service string, userData io.Reader,
 	if appErr != nil {
 		return nil, appErr
 	}
+
+	return user, nil
+}
+
+// linkOAuthUserByVerifiedEmail attaches an OpenID identity to an existing account that has no
+// SSO identity yet, matched by email. It only trusts emails the identity provider marks as
+// verified, so it is safe only while users cannot change their own email at the provider.
+// It returns a nil user when no account can be linked.
+func (a *App) linkOAuthUserByVerifiedEmail(rctx request.CTX, service string, authUser *model.User) (*model.User, *model.AppError) {
+	if service != model.ServiceOpenid || !authUser.EmailVerified || authUser.Email == "" {
+		return nil, nil
+	}
+
+	user, appErr := a.GetUserByEmail(authUser.Email)
+	if appErr != nil {
+		if appErr.StatusCode == http.StatusNotFound {
+			return nil, nil
+		}
+		return nil, appErr
+	}
+
+	if user.AuthService != "" {
+		return nil, nil
+	}
+
+	if appErr := checkUserNotBot(user); appErr != nil {
+		return nil, appErr
+	}
+
+	if appErr := checkUserNotDisabled(user); appErr != nil {
+		return nil, appErr
+	}
+
+	if _, err := a.Srv().Store().User().UpdateAuthData(user.Id, service, authUser.AuthData, "", false); err != nil {
+		return nil, model.NewAppError("linkOAuthUserByVerifiedEmail", "app.user.update_auth_data.app_error", nil, "", http.StatusInternalServerError).Wrap(err)
+	}
+
+	a.InvalidateCacheForUser(user.Id)
+
+	user.AuthService = service
+	user.AuthData = authUser.AuthData
+
+	rctx.Logger().Info("Linked existing account to OpenID identity by verified email", mlog.String("user_id", user.Id))
 
 	return user, nil
 }
