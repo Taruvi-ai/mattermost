@@ -690,6 +690,23 @@ func TestGetLimitedClientConfig(t *testing.T) {
 			},
 		},
 		{
+			"unlicensed OpenID Connect",
+			&model.Config{
+				OpenIdSettings: model.SSOSettings{
+					Enable:      model.NewPointer(true),
+					ButtonText:  model.NewPointer("Sign in with Taruvi"),
+					ButtonColor: model.NewPointer("#0F2044"),
+				},
+			},
+			"",
+			nil,
+			map[string]string{
+				"EnableSignUpWithOpenId": "true",
+				"OpenIdButtonText":       "Sign in with Taruvi",
+				"OpenIdButtonColor":      "#0F2044",
+			},
+		},
+		{
 			"limited config mobile watermark uses experimental settings",
 			&model.Config{
 				ExperimentalSettings: model.ExperimentalSettings{
