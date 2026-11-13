@@ -420,6 +420,22 @@ export default function AboutBuildModal(props: Props) {
                             }}
                         />
                     </p>
+                    <p>
+                        <FormattedMessage
+                            id='about.sourceCode'
+                            defaultMessage='This server runs a modified version of Mattermost. Its source code is available at <link>github.com/Taruvi-ai/mattermost</link>.'
+                            values={{
+                                link: (msg: React.ReactNode) => (
+                                    <ExternalLink
+                                        location='about_build_modal'
+                                        href={`https://github.com/Taruvi-ai/mattermost/tree/${config.BuildHash}`}
+                                    >
+                                        {msg}
+                                    </ExternalLink>
+                                ),
+                            }}
+                        />
+                    </p>
                 </div>
                 <div className='about-modal__hash'>
                     <p>
