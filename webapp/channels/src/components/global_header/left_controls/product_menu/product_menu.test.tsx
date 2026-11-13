@@ -16,12 +16,6 @@ jest.mock('./product_branding', () => {
     };
 });
 
-jest.mock('./product_branding_team_edition', () => {
-    return function MockProductBrandingFreeEdition() {
-        return <div data-testid='product-branding-free-edition'/>;
-    };
-});
-
 jest.mock('./product_menu_list', () => {
     return function MockProductMenuList() {
         return <div data-testid='product-menu-list'/>;
@@ -189,7 +183,7 @@ describe('components/global/product_switcher', () => {
         expect(container).toMatchSnapshot();
     });
 
-    it('should render ProductBrandingFreeEdition for Entry license', () => {
+    it('should render ProductBranding for Entry license', () => {
         const state = {
             ...baseState,
             entities: {
@@ -209,11 +203,10 @@ describe('components/global/product_switcher', () => {
             state,
         );
 
-        expect(screen.getByTestId('product-branding-free-edition')).toBeInTheDocument();
-        expect(screen.queryByTestId('product-branding')).not.toBeInTheDocument();
+        expect(screen.getByTestId('product-branding')).toBeInTheDocument();
     });
 
-    it('should render ProductBrandingFreeEdition for unlicensed', () => {
+    it('should render ProductBranding for unlicensed', () => {
         const state = {
             ...baseState,
             entities: {
@@ -232,8 +225,7 @@ describe('components/global/product_switcher', () => {
             state,
         );
 
-        expect(screen.getByTestId('product-branding-free-edition')).toBeInTheDocument();
-        expect(screen.queryByTestId('product-branding')).not.toBeInTheDocument();
+        expect(screen.getByTestId('product-branding')).toBeInTheDocument();
     });
 
     it('should render ProductBranding for Professional license', () => {
@@ -257,7 +249,6 @@ describe('components/global/product_switcher', () => {
         );
 
         expect(screen.getByTestId('product-branding')).toBeInTheDocument();
-        expect(screen.queryByTestId('product-branding-free-edition')).not.toBeInTheDocument();
     });
 
     it('should render ProductBranding for Enterprise license', () => {
@@ -281,7 +272,6 @@ describe('components/global/product_switcher', () => {
         );
 
         expect(screen.getByTestId('product-branding')).toBeInTheDocument();
-        expect(screen.queryByTestId('product-branding-free-edition')).not.toBeInTheDocument();
     });
 
     it('should match snapshot for Entry license', () => {
