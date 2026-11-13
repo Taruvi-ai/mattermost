@@ -53,6 +53,13 @@ spec:
     value: 'false'
   - name: MM_TEAMSETTINGS_SITENAME
     value: Taruvi
+  # Keycloak (OpenID Connect) is the only way to sign in
+  - name: MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL
+    value: 'false'
+  - name: MM_EMAILSETTINGS_ENABLESIGNINWITHUSERNAME
+    value: 'false'
+  - name: MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL
+    value: 'false'
   - name: MM_SQLSETTINGS_DATASOURCE
     valueFrom:
       secretKeyRef:

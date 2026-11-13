@@ -48,6 +48,13 @@ spec:
   # Overrides the operator's default label "production"; explicit entries win.
   - name: MM_CLUSTERSETTINGS_CLUSTERNAME
     value: staging
+  # Keycloak (OpenID Connect) is the only way to sign in
+  - name: MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL
+    value: 'false'
+  - name: MM_EMAILSETTINGS_ENABLESIGNINWITHUSERNAME
+    value: 'false'
+  - name: MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL
+    value: 'false'
   - name: MM_FILESETTINGS_AMAZONS3BUCKET
     valueFrom:
       secretKeyRef:
