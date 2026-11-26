@@ -26,7 +26,7 @@ spec:
   fileStore:
     external:
       bucket: eoschat
-      secret: mm-infisical
+      useServiceAccount: true
       url: s3.amazonaws.com
   scheduling:
     resources:
@@ -56,15 +56,13 @@ spec:
   - name: MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL
     value: 'false'
   - name: MM_FILESETTINGS_AMAZONS3BUCKET
-    valueFrom:
-      secretKeyRef:
-        name: mm-infisical
-        key: MM_FILESETTINGS_AMAZONS3BUCKET
+    value: eoschat
   - name: MM_FILESETTINGS_AMAZONS3PATHPREFIX
-    valueFrom:
-      secretKeyRef:
-        name: mm-infisical
-        key: MM_FILESETTINGS_AMAZONS3PATHPREFIX
+    value: taruvi-stag/prod
+  - name: MM_FILESETTINGS_AMAZONS3ACCESSKEYID
+    value: ""
+  - name: MM_FILESETTINGS_AMAZONS3SECRETACCESSKEY
+    value: ""
   - name: MM_SERVICESETTINGS_ENABLEGIFPICKER
     valueFrom:
       secretKeyRef:
